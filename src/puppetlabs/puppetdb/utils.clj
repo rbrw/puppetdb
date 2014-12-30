@@ -6,7 +6,8 @@
             [puppetlabs.puppetdb.schema :as pls]
             [puppetlabs.puppetdb.archive :as archive]
             [clojure.java.io :as io]
-            [clojure.walk :as walk]))
+            [clojure.walk :as walk])
+  (:import [java.net MalformedURLException URISyntaxException URL]))
 
 (defn jdk6?
   "Returns true when the current JDK version is 1.6"
@@ -123,3 +124,38 @@
   "Vectorize an argument if it's not already vector"
   [v]
   (if (vector? v) v (vector v)))
+
+(defn base-url?
+  "Verifies that `x' appears to be a base-url."
+  [x]
+  (and (map? x)
+       (string? (:protocol x))
+       (string? (:host x))
+       (integer? (:port x))
+       ((some-fn nil? string?) (:prefix x))
+       (if-let [v (:version x)]
+         (and (keyword? v) (re-matches #"v\d+" (name v)))
+         true)))
+
+(defn base-url->str
+  "Converts the `base-url' map to an ASCII URL.  May throw
+   MalformedURLException or URISyntaxException."
+  [base-url]
+  {:pre [(base-url? base-url)]}
+  (-> (URL. (:protocol base-url) (:host base-url) (:port base-url)
+            (str (when-let [p (:prefix base-url)]
+                   (str "/" p))
+                 "/" (name (or (:version base-url) :v4))))
+    .toURI .toASCIIString))
+
+(defn report-bad-base-url [base-url msg-prefix]
+  (letfn [(report [ex]
+            (binding [*out* *err*]
+              (printf "%s (%s)\n" msg-prefix (.getLocalizedMessage ex))
+              (flush)
+              true))]
+    (try
+      (base-url->str base-url)
+      false
+      (catch MalformedURLException ex (report ex))
+      (catch URISyntaxException ex (report ex)))))
