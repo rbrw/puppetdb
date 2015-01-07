@@ -17,7 +17,7 @@
             [schema.core :as s]
             [clojure.string :as str]
             [puppetlabs.puppetdb.utils :as utils]
-            [slingshot.slingshot :refer [try+]]
+            [slingshot.slingshot :refer [throw+ try+]]
             [clj-time.core :refer [now]]
             [clj-http.util :refer [url-encode]]))
 
@@ -210,12 +210,12 @@
          :puppetlabs.kitchensink.core/cli-error (System/exit 1)
          :puppetlabs.kitchensink.core/cli-help  (System/exit 0))))))
 
-(defn -main
+(defn- main
   [& args]
   (let [[{:keys [outfile host port url-prefix] :as opts} _] (validate-cli! args)
         src {:protocol "http" :host host :port port :prefix url-prefix}
         _ (if (utils/report-bad-base-url src "Invalid source")
-            (System/exit 1))
+            (throw+ {:type :exit-process :status 1}))
         nodes (get-nodes src)]
     ;; TODO: do we need to deal with SSL or can we assume this only works over a plaintext port?
     (with-open [tar-writer (archive/tarball-writer outfile)]
@@ -225,3 +225,10 @@
         (doseq [{:keys [msg] :as tar-item} (mapcat node-data [:catalog :reports :facts])]
           (println msg)
           (utils/add-tar-entry tar-writer tar-item))))))
+
+(defn -main
+  [& args]
+  (try+
+   (apply main args)
+   (catch [:type :exit-process] {:keys [status]}
+     (System/exit status))))

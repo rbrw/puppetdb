@@ -22,7 +22,7 @@
             [puppetlabs.puppetdb.utils :as utils]
             [clojure.tools.logging.impl :as li]
             [puppetlabs.puppetdb.client :as pdb-client]
-            [slingshot.slingshot :refer [throw+]]
+            [slingshot.slingshot :refer [throw+ try+]]
             [puppetlabs.puppetdb.testutils.jetty :as jutils :refer [*base-url*]]))
 
 (use-fixtures :each fixt/with-test-logging-silenced)
@@ -187,3 +187,24 @@
                                   (json/parse-string
                                    (export/catalog-for-node *base-url*
                                                             "foo.local")))))))))
+
+(defn- check-invalid-url-handling [cmd expected-msg-re]
+  (is (re-find expected-msg-re
+               (with-out-str
+                 (binding [*err* *out*]
+                   (is (try+
+                        (cmd)
+                        false
+                        (catch [:type :exit-process] {:keys [status]}
+                          (not (zero? status))))))))))
+
+(deftest invalid-export-source-handling
+  (check-invalid-url-handling
+   #(#'export/main "--host" "local:host" "--outfile" "/dev/null" "--port" 10000)
+   #"Invalid source"))
+
+(deftest invalid-import-destination-handling
+  (check-invalid-url-handling
+   #(#'import/main "--host" "local:host" "--infile" "/dev/null" "--port" 10000)
+   #"Invalid destination"))
+
