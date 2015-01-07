@@ -17,7 +17,8 @@
                                                report-bad-base-url]]
             [puppetlabs.kitchensink.core :refer [cli!]]
             [puppetlabs.puppetdb.cli.export :refer [export-metadata-file-name]]
-            [schema.core :as s]))
+            [schema.core :as s]
+            [slingshot.slingshot :refer [try+ throw+]]))
 
 (def cli-description "Import PuppetDB catalog data from a backup file")
 
@@ -98,14 +99,20 @@
          :puppetlabs.kitchensink.core/cli-error (System/exit 1)
          :puppetlabs.kitchensink.core/cli-help  (System/exit 0))))))
 
-(defn -main
-  [& args]
+(defn- main [& args]
   (let [[{:keys [infile host port url-prefix]} _] (validate-cli! args)
         dest {:protocol "http" :host host :port port :prefix url-prefix}
         _ (if (report-bad-base-url dest "Invalid destination")
-            (System/exit 1))
+            (throw+ {:type :exit-process :status 1}))
         metadata                       (parse-metadata infile)]
     ;; TODO: do we need to deal with SSL or can we assume this only works over a plaintext port?
     (with-open [tar-reader (archive/tarball-reader infile)]
       (doseq [tar-entry (archive/all-entries tar-reader)]
         (process-tar-entry tar-reader tar-entry dest metadata)))))
+
+(defn -main
+  [& args]
+  (try+
+   (apply main args)
+   (catch [:type :exit-process] {:keys [status]}
+     (System/exit status))))
