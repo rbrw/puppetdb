@@ -255,7 +255,7 @@ module PuppetDBExtensions
     # Hit an actual endpoint to ensure PuppetDB is up and not just the webserver.
     # Retry until an HTTP response code of 200 is received.
     curl_with_retries("start puppetdb", host,
-                      "-s -w '%{http_code}' http://localhost:8080/v3/version -o /dev/null",
+                      "-s -w '%{http_code}' http://localhost:8080/v4/version -o /dev/null",
                       0, 120, 1, /200/)
     curl_with_retries("start puppetdb (ssl)", host,
                       "https://#{host.node_name}:8081/", [35, 60])
@@ -527,7 +527,7 @@ module PuppetDBExtensions
     begin
       Timeout.timeout(timeout) do
         until queue_size == 0
-          result = on host, %Q(curl http://localhost:8080/v3/metrics/mbean/#{CGI.escape(metric)} 2> /dev/null |awk -F"," '{for (i = 1; i <= NF; i++) { print $i } }' |grep QueueSize |awk -F ":" '{ print $2 }')
+          result = on host, %Q(curl http://localhost:8080/v4/metrics/mbean/#{CGI.escape(metric)} 2> /dev/null |awk -F"," '{for (i = 1; i <= NF; i++) { print $i } }' |grep QueueSize |awk -F ":" '{ print $2 }')
           queue_size = Integer(result.stdout.chomp)
         end
       end
@@ -541,7 +541,7 @@ module PuppetDBExtensions
   def command_processing_stats(host, counter = "processed")
     metric = "puppetlabs.puppetdb.command:type=global,name=discarded"
 
-    result = on host, %Q(curl http://localhost:8080/v3/metrics/mbean/#{CGI.escape(metric)})
+    result = on host, %Q(curl http://localhost:8080/v4/metrics/mbean/#{CGI.escape(metric)})
 
     begin
       JSON.parse(result.stdout)

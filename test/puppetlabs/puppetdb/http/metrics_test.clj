@@ -10,9 +10,7 @@
 
 (use-fixtures :each fixt/with-test-db fixt/with-test-mq fixt/with-http-app)
 
-(def endpoints [[:v2 "/v2/metrics"]
-                [:v3 "/v3/metrics"]
-                [:v4 "/v4/metrics"]])
+(def endpoints [[:v4 "/v4/metrics"]])
 
 (deftest mean-filtering
   (testing "MBean filtering"
