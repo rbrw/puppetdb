@@ -233,26 +233,19 @@
 (defn node-columns
   "Return the queryable set of fields and corresponding table names where they reside"
   [version]
-  (case version
-    (:v1 :v2 :v3)
-    {"name"                     "certnames"
-     "deactivated"              "certnames"}
-
-    {"name"                     "certnames"
-     "deactivated"              "certnames"
-     "facts_environment"   "certnames"
-     "report_environment"  "certnames"
-     "catalog_environment" "certnames"
-     "facts_timestamp"          "certnames"
-     "report_timestamp"         "certnames"
-     "catalog_timestamp"        "certnames"}))
+  {"name"                     "certnames"
+   "deactivated"              "certnames"
+   "facts_environment"   "certnames"
+   "report_environment"  "certnames"
+   "catalog_environment" "certnames"
+   "facts_timestamp"          "certnames"
+   "report_timestamp"         "certnames"
+   "catalog_timestamp"        "certnames"})
 
 (defn node-std-fields
   "Return the set of standard parameters (these support all operators) for nodes"
   [version]
-  (case version
-    (:v1 :v2 :v3) #{"name"}
-    #{"name" "facts-environment" "catalog-environment" "report-environment"}))
+  #{"name" "facts-environment" "catalog-environment" "report-environment"})
 
 (def environments-columns {"name" "environments"})
 
@@ -308,12 +301,7 @@
 
 (defmethod queryable-fields :resource
   [_ query-api-version]
-  (case query-api-version
-    :v1 (throw (IllegalArgumentException. "api v1 is retired"))
-    :v2 (-> (keyset resource-columns)
-            (set/union (keyset v3-renamed-resource-columns))
-            (set/difference (valset v3-renamed-resource-columns)))
-    (keyset resource-columns)))
+  (keyset resource-columns))
 
 (defmethod queryable-fields :fact
   [_ _]
@@ -433,36 +421,31 @@
   for the query. All node columns are selected, and no order is applied."
   [version ops query]
   {:post [(valid-jdbc-query? %)]}
-  (let [sql (case version
-              (:v1 :v2 :v3)
-              (format "SELECT %s FROM certnames"
-                      (column-map->sql (node-columns version)))
-
-              (format "SELECT %s FROM (SELECT
-                       certnames.name,
-                       certnames.deactivated,
-                       catalogs.timestamp AS catalog_timestamp,
-                       factsets.timestamp AS facts_timestamp,
-                       reports.end_time AS report_timestamp,
-                       catalog_environment.name AS catalog_environment,
-                       facts_environment.name AS facts_environment,
-                       reports_environment.name AS report_environment
-                       FROM certnames
-                         LEFT OUTER JOIN catalogs
-                           ON certnames.name = catalogs.certname
-                         LEFT OUTER JOIN factsets
-                           ON certnames.name = factsets.certname
-                         LEFT OUTER JOIN reports
-                           ON certnames.name = reports.certname
-                             AND reports.hash
-                               IN (SELECT report FROM latest_reports)
-                         LEFT OUTER JOIN environments AS catalog_environment
-                           ON catalog_environment.id = catalogs.environment_id
-                         LEFT OUTER JOIN environments AS facts_environment
-                           ON facts_environment.id = factsets.environment_id
-                         LEFT OUTER JOIN environments AS reports_environment
-                           ON reports_environment.id = reports.environment_id) as certnames"
-                      (column-map->sql (node-columns version))))]
+  (let [sql (format "SELECT %s FROM (SELECT
+                     certnames.name,
+                     certnames.deactivated,
+                     catalogs.timestamp AS catalog_timestamp,
+                     factsets.timestamp AS facts_timestamp,
+                     reports.end_time AS report_timestamp,
+                     catalog_environment.name AS catalog_environment,
+                     facts_environment.name AS facts_environment,
+                     reports_environment.name AS report_environment
+                     FROM certnames
+                       LEFT OUTER JOIN catalogs
+                         ON certnames.name = catalogs.certname
+                       LEFT OUTER JOIN factsets
+                         ON certnames.name = factsets.certname
+                       LEFT OUTER JOIN reports
+                         ON certnames.name = reports.certname
+                           AND reports.hash
+                             IN (SELECT report FROM latest_reports)
+                       LEFT OUTER JOIN environments AS catalog_environment
+                         ON catalog_environment.id = catalogs.environment_id
+                       LEFT OUTER JOIN environments AS facts_environment
+                         ON facts_environment.id = factsets.environment_id
+                       LEFT OUTER JOIN environments AS reports_environment
+                         ON reports_environment.id = reports.environment_id) as certnames"
+                    (column-map->sql (node-columns version)))]
     (if query
       (let [{:keys [where params]} (compile-term ops query)
             sql (str sql (format " WHERE %s" where))]
@@ -518,48 +501,40 @@
           (:where %)]}
   (when-not (= (count args) 2)
     (throw (IllegalArgumentException. (format "= requires exactly two arguments, but %d were supplied" (count args)))))
-  (case version
-    :v1 (throw (IllegalArgumentException. "api v1 is retired"))
-    :v2 (do
-          ;; If they passed in any of the new names for the renamed resource-columns, we fail
-          ;; because this is v2.
-          (when (contains? (valset v3-renamed-resource-columns) path)
-            (throw (IllegalArgumentException. (format "%s is not a queryable object for resources" path))))
-          (compile-resource-equality :v3 (get v3-renamed-resource-columns path path) value))
-    (match [path]
-           ;; tag join. Tags are case-insensitive but always lowercase, so
-           ;; lowercase the query value.
-           ["tag"]
-           {:where  (sql-array-query-string "tags")
-            :params [(str/lower-case value)]}
+  (match [path]
+         ;; tag join. Tags are case-insensitive but always lowercase, so
+         ;; lowercase the query value.
+         ["tag"]
+         {:where  (sql-array-query-string "tags")
+          :params [(str/lower-case value)]}
 
-           ;; node join.
-           ["certname"]
-           {:where  "catalogs.certname = ?"
-            :params [value]}
+         ;; node join.
+         ["certname"]
+         {:where  "catalogs.certname = ?"
+          :params [value]}
 
-           ["environment" :guard (http/v4-or-newer? version)]
-           {:where  "catalog_resources.environment = ?"
-            :params [value]}
+         ["environment"]
+         {:where  "catalog_resources.environment = ?"
+          :params [value]}
 
-           ;; {in,}active nodes.
-           [["node" "active"]]
-           {
-            :where (format "catalogs.certname IN (SELECT name FROM certnames WHERE deactivated IS %s)" (if value "NULL" "NOT NULL"))}
+         ;; {in,}active nodes.
+         [["node" "active"]]
+         {
+          :where (format "catalogs.certname IN (SELECT name FROM certnames WHERE deactivated IS %s)" (if value "NULL" "NOT NULL"))}
 
-           ;; param joins.
-           [["parameter" (name :guard string?)]]
-           {:where  "catalog_resources.resource IN (SELECT rp.resource FROM resource_params rp WHERE rp.name = ? AND rp.value = ?)"
-            :params [name (db-serialize value)]}
+         ;; param joins.
+         [["parameter" (name :guard string?)]]
+         {:where  "catalog_resources.resource IN (SELECT rp.resource FROM resource_params rp WHERE rp.name = ? AND rp.value = ?)"
+          :params [name (db-serialize value)]}
 
-           ;; metadata match.
-           [(metadata :guard #{"catalog" "resource" "type" "title" "tags" "exported" "file" "line"})]
-           {:where  (format "catalog_resources.%s = ?" metadata)
-            :params [value]}
+         ;; metadata match.
+         [(metadata :guard #{"catalog" "resource" "type" "title" "tags" "exported" "file" "line"})]
+         {:where  (format "catalog_resources.%s = ?" metadata)
+          :params [value]}
 
-           ;; ...else, failure
-           :else (throw (IllegalArgumentException.
-                         (format "'%s' is not a queryable object for resources in the version %s API" path (last (name version))))))))
+         ;; ...else, failure
+         :else (throw (IllegalArgumentException.
+                       (format "'%s' is not a queryable object for resources in the version %s API" path (last (name version)))))))
 
 (defn compile-resource-regexp
   "Compile an '~' predicate for a resource query, which does regexp matching.
@@ -568,34 +543,28 @@
   [version & [path value :as args]]
   {:post [(map? %)
           (:where %)]}
-  (case version
-    :v1 (throw (IllegalArgumentException. "api v1 is retired"))
-    :v2 (do
-          (when (contains? (valset v3-renamed-resource-columns) path)
-            (throw (IllegalArgumentException. (format "%s cannot be the target of a regexp match" path))))
-          (compile-resource-regexp :v3 (get v3-renamed-resource-columns path path) value))
-    (match [path]
-           ["tag"]
-           {:where (sql-regexp-array-match "catalog_resources" "catalog_resources" "tags")
-            :params [value]}
+  (match [path]
+         ["tag"]
+         {:where (sql-regexp-array-match "catalog_resources" "catalog_resources" "tags")
+          :params [value]}
 
-           ;; node join.
-           ["certname"]
-           {:where  (sql-regexp-match "catalogs.certname")
-            :params [value]}
+         ;; node join.
+         ["certname"]
+         {:where  (sql-regexp-match "catalogs.certname")
+          :params [value]}
 
-           ["environment" :guard (http/v4-or-newer? version)]
-           {:where  (sql-regexp-match "catalog_resources.environment")
-            :params [value]}
+         ["environment"]
+         {:where  (sql-regexp-match "catalog_resources.environment")
+          :params [value]}
 
-           ;; metadata match.
-           [(metadata :guard #{"type" "title" "exported" "file"})]
-           {:where  (sql-regexp-match (format "catalog_resources.%s" metadata))
-            :params [value]}
+         ;; metadata match.
+         [(metadata :guard #{"type" "title" "exported" "file"})]
+         {:where  (sql-regexp-match (format "catalog_resources.%s" metadata))
+          :params [value]}
 
-           ;; ...else, failure
-           :else (throw (IllegalArgumentException.
-                         (format "'%s' cannot be the target of a regexp match for version %s of the resources API" path (last (name version))))))))
+         ;; ...else, failure
+         :else (throw (IllegalArgumentException.
+                       (format "'%s' cannot be the target of a regexp match for version %s of the resources API" path (last (name version)))))))
 
 (defn compile-fact-equality
   "Compile an = predicate for a fact query. `path` represents the field to
@@ -617,7 +586,7 @@
            {:where "facts.certname = ?"
             :params [value]}
 
-           ["environment" :guard (http/v4-or-newer? version)]
+           ["environment"]
            {:where "facts.environment = ?"
             :params [value]}
 
@@ -645,7 +614,7 @@
              ["certname"]
              (query "facts.certname")
 
-             ["environment" :guard (http/v4-or-newer? version)]
+             ["environment"]
              (query "facts.environment")
 
              ["name"]
@@ -785,16 +754,13 @@
   [version path value]
   {:post [(map? %)
           (string? (:where %))]}
-  (case version
-    :v1 (throw (IllegalArgumentException. "api v1 is retired"))
-    (:v2 :v3) (throw (IllegalArgumentException. (format "Querying for environments not supported in version %s" (last (name version)))))
-    (match [path]
-           ["name"]
-           {:where "environments.name = ?"
-            :params [value]}
+  (match [path]
+         ["name"]
+         {:where "environments.name = ?"
+          :params [value]}
 
-           :else (throw (IllegalArgumentException.
-                         (str path " is not a queryable object for environments"))))))
+         :else (throw (IllegalArgumentException.
+                       (str path " is not a queryable object for environments")))))
 
 (defn compile-environments-regexp
   "Compile an '~' predicate for an environments query, which does regexp matching.  This
@@ -857,7 +823,7 @@
              {:where (format "resource_events.report %s (SELECT latest_reports.report FROM latest_reports)"
                              (if value "IN" "NOT IN"))}
 
-             ["environment" :guard (http/v4-or-newer? version)]
+             ["environment"]
              {:where "environments.name = ?"
               :params [value]}
 
@@ -899,7 +865,7 @@
              {:where (sql-regexp-match "reports.certname")
               :params [pattern]}
 
-             ["environment" :guard (http/v4-or-newer? version)]
+             ["environment"]
              {:where (sql-regexp-match "environments.name")
               :params [pattern]}
 
@@ -939,11 +905,11 @@
            {:where "reports.hash = ?"
             :params [value]}
 
-           ["environment" :guard (http/v4-or-newer? version)]
+           ["environment"]
            {:where "environments.name = ?"
             :params [value]}
 
-           ["status" :guard (http/v4-or-newer? version)]
+           ["status"]
            {:where "report_statuses.status = ?"
             :params [value]}
 
@@ -1072,41 +1038,27 @@
   "Maps resource event query operators to the functions implementing them. Returns nil
   if the operator isn't known."
   [version]
-  (case version
-    :v1 (throw (IllegalArgumentException. "api v1 is retired"))
-    :v2 (throw (IllegalArgumentException. (str "Resource events end-point not available for api version " version)))
-    :v3 (fn [op]
-          (let [op (str/lower-case op)]
-            (cond
-             (= op "=") (compile-resource-event-equality version)
-             (= op "and") (partial compile-and (resource-event-ops version))
-             (= op "or") (partial compile-or (resource-event-ops version))
-             (= op "not") (partial compile-not version (resource-event-ops version))
-             (#{">" "<" ">=" "<="} op) (partial compile-resource-event-inequality op)
-             (= op "~") (compile-resource-event-regexp version))))
-    (fn [op]
-      (let [op (str/lower-case op)]
-        (cond
-         (= op "=") (compile-resource-event-equality version)
-         (= op "and") (partial compile-and (resource-event-ops version))
-         (= op "or") (partial compile-or (resource-event-ops version))
-         (= op "not") (partial compile-not version (resource-event-ops version))
-         (#{">" "<" ">=" "<="} op) (partial compile-resource-event-inequality op)
-         (= op "~") (compile-resource-event-regexp version)
-         (= op "extract") (partial compile-extract version (resource-event-ops version))
-         (= op "in") (partial compile-in :event version (resource-event-ops version))
-         (= op "select-resources") (partial resource-query->sql (resource-operators version))
-         (= op "select-facts") (partial fact-query->sql (fact-operators version)))))))
+  (fn [op]
+    (let [op (str/lower-case op)]
+      (cond
+        (= op "=") (compile-resource-event-equality version)
+        (= op "and") (partial compile-and (resource-event-ops version))
+        (= op "or") (partial compile-or (resource-event-ops version))
+        (= op "not") (partial compile-not version (resource-event-ops version))
+        (#{">" "<" ">=" "<="} op) (partial compile-resource-event-inequality op)
+        (= op "~") (compile-resource-event-regexp version)
+        (= op "extract") (partial compile-extract version (resource-event-ops version))
+        (= op "in") (partial compile-in :event version (resource-event-ops version))
+        (= op "select-resources") (partial resource-query->sql (resource-operators version))
+        (= op "select-facts") (partial fact-query->sql (fact-operators version))))))
 
 (defn report-ops
   [version]
-  (case version
-    :v1 (throw (IllegalArgumentException. "api v1 is retired"))
-    (fn [op]
-      (let [op (str/lower-case op)]
-        (cond
-         (= op "=") (compile-reports-equality version)
-         (= op "and") (partial compile-and (report-ops version)))))))
+  (fn [op]
+    (let [op (str/lower-case op)]
+      (cond
+        (= op "=") (compile-reports-equality version)
+        (= op "and") (partial compile-and (report-ops version))))))
 
 (defn event-count-ops
   "Maps resource event count operators to the functions implementing them.
