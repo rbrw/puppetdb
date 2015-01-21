@@ -52,13 +52,10 @@
   (fn [rows]
     (if (empty? rows)
       []
-      (let [new-rows (->> rows
-                          convert-types
-                          (map #(select-keys % (or (seq projections)
-                                                   [:certname :environment :timestamp :name :value]))))]
-        (case version
-          (:v2 :v3) (map #(update-in % [:value] stringify-value) new-rows)
-          new-rows)))))
+      (->> rows
+        convert-types
+        (map #(select-keys % (or (seq projections)
+                                 [:certname :environment :timestamp :name :value])))))))
 
 (defn facts-sql
   "Return a vector with the facts SQL query string as the first element,
@@ -108,19 +105,9 @@
    :post [(map? %)
           (string? (first (:results-query %)))
           (every? (complement coll?) (rest (:results-query %)))]}
-  (let [columns (if (contains? #{:v2 :v3} version)
-                  (map keyword (keys (dissoc query/fact-columns "environment")))
-                  (map keyword (keys (dissoc query/fact-columns "value"))))]
+  (let [columns (map keyword (keys (dissoc query/fact-columns "value")))]
     (paging/validate-order-by! columns paging-options)
-    (case version
-      (:v2 :v3)
-      (let [operators (query/fact-operators version)
-            [sql & params] (facts-sql operators query)]
-        (conj {:results-query (apply vector (jdbc/paged-sql sql paging-options) params)}
-              (when (:count? paging-options)
-                [:count-query (apply vector (jdbc/count-sql sql) params)])))
-      (qe/compile-user-query->sql
-       qe/facts-query query paging-options))))
+    (qe/compile-user-query->sql qe/facts-query query paging-options)))
 
 (defn fact-names
   "Returns the distinct list of known fact names, ordered alphabetically
