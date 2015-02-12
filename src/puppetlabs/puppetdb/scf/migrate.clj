@@ -890,6 +890,40 @@
     "ALTER TABLE factsets ADD hash VARCHAR(40)"
     "ALTER TABLE factsets ADD CONSTRAINT factsets_hash_key UNIQUE (hash)"))
 
+(defn lift-fact-paths-into-facts
+  "Pair paths and values directly in facts, i.e. change facts from (id
+  value) to (id path value)."
+  []
+  (sql/do-commands
+   ;; FIXME: is INCLUDING ALL OK?  i.e. OK to include DEFAULTS?
+   ;; cf. http://www.postgresql.org/docs/9.4/static/sql-createtable.html
+   "CREATE TABLE facts_transform (LIKE facts INCLUDING ALL)"
+   "ALTER TABLE facts_transform ADD COLUMN fact_path_id bigint NOT NULL"
+
+   "ALTER TABLE facts DROP CONSTRAINT facts_factset_id_fact_value_id_key"
+   "ALTER TABLE facts_transform
+      ADD CONSTRAINT facts_factset_id_fact_path_id_fact_value_id_key
+        UNIQUE (factset_id, fact_path_id, fact_value_id)"
+
+   ;; CHECK: Do we still want/need these to be deferrable, after the GC changes?
+   "ALTER TABLE facts_transform ADD CONSTRAINT fact_path_id_fk
+      FOREIGN KEY (fact_path_id) REFERENCES fact_paths(id)
+      ON UPDATE NO ACTION ON DELETE NO ACTION
+      DEFERRABLE"
+
+   "INSERT INTO facts_transform (factset_id, fact_path_id, fact_value_id)
+      SELECT f.factset_id, fp.id, f.fact_value_id
+        FROM facts f
+          INNER JOIN fact_values fv on f.fact_value_id = fv.id
+          INNER JOIN fact_paths fp on fv.path_id = fp.id"
+
+   "DROP TABLE facts"
+   "ALTER TABLE facts_transform RENAME TO facts"
+
+   "ALTER TABLE fact_paths DROP COLUMN value_type_id"
+   "ALTER TABLE fact_values DROP COLUMN path_id"))
+
+
 (def migrations
   "The available migrations, as a map from migration version to migration function."
   {1 initialize-store
@@ -919,7 +953,10 @@
    25 structured-facts
    26 structured-facts-deferrable-constraints
    27 switch-value-string-index-to-gin
-   28 insert-factset-hash-column})
+   28 insert-factset-hash-column
+   29 #(log/info
+        (str "lift:"
+             (with-out-str (time (apply lift-fact-paths-into-facts %&)))))})
 
 (def desired-schema-version (apply max (keys migrations)))
 
