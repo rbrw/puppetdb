@@ -51,6 +51,7 @@
   (:require [clojure.java.jdbc :as sql]
             [clojure.tools.logging :as log]
             [clojure.string :as string]
+            [com.puppetlabs.puppetdb.scf.migration-legacy :as legacy]
             [com.puppetlabs.puppetdb.scf.storage :as scf-store]
             [com.puppetlabs.cheshire :as json]
             [puppetlabs.kitchensink.core :as kitchensink]
@@ -723,7 +724,7 @@
                              first
                              :name)]
         (when-not (empty? facts)
-          (scf-store/add-facts!
+          (legacy/add-facts-28!
             {:name (str certname)
              :values facts
              :timestamp timestamp
@@ -1038,28 +1039,30 @@
         (select-keys migrations pending))))
 
 (defn migrate!
-  "Migrates database to the latest schema version. Does nothing if database is
-  already at the latest schema version."
-  []
-  (if-let [unexpected (first (difference (applied-migrations) (kitchensink/keyset migrations)))]
-    (throw (IllegalStateException.
-              (format "Your PuppetDB database contains a schema migration numbered %d, but this version of PuppetDB does not recognize that version."
-                    unexpected))))
+  "Migrates database to the latest version or to n. Does nothing if
+  database is already up to date (or up to n, when specified)."
+  ([] (migrate! Double/POSITIVE_INFINITY))
+  ([n]
+   (if-let [unexpected (first (difference (applied-migrations)
+                                          (kitchensink/keyset migrations)))]
+     (throw (IllegalStateException.
+             (format "Your PuppetDB database contains a schema migration numbered %d, but this version of PuppetDB does not recognize that version."
+                     unexpected))))
 
-  (if-let [pending (seq (pending-migrations))]
-    (sql/transaction
-     (doseq [[version migration] pending]
-       (log/info (format "Applying database migration version %d" version))
-       (try
-         (migration)
-         (record-migration! version)
-         (catch java.sql.SQLException e
-           (log/error e "Caught SQLException during migration")
-           (let [next (.getNextException e)]
-             (when-not (nil? next)
-               (log/error next "Unravelled exception")))
-           (System/exit 1)))))
-    (log/info "There are no pending migrations")))
+   (if-let [pending (seq (pending-migrations))]
+     (sql/transaction
+      (doseq [[version migration] pending :when (< version n)]
+        (log/info (format "Applying database migration version %d" version))
+        (try
+          (migration)
+          (record-migration! version)
+          (catch java.sql.SQLException e
+            (log/error e "Caught SQLException during migration")
+            (let [next (.getNextException e)]
+              (when-not (nil? next)
+                (log/error next "Unravelled exception")))
+            (System/exit 1)))))
+     (log/info "There are no pending migrations"))))
 
 ;; SPECIAL INDEX HANDLING
 
