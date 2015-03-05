@@ -673,6 +673,7 @@
     ;; Block until an exception is thrown by the consumer thread
     (try
       (deref mq-error)
-      (throw @mq-error)
+      (scf-storage/dump-any-sqlexcepton-info-and-rethrow @mq-error)
+      ;;(throw @mq-error)
       (finally
         (mq-cons/close consumer)))))

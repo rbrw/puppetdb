@@ -25,6 +25,7 @@
             [puppetlabs.kitchensink.core :as kitchensink]
             [com.puppetlabs.jdbc :as jdbc]
             [clojure.java.jdbc :as sql]
+            [clojure.stacktrace :as strace]
             [clojure.set :as set]
             [clojure.string :as str]
             [clojure.tools.logging :as log]
@@ -45,7 +46,8 @@
             [metrics.gauges :refer [gauge]]
             [metrics.histograms :refer [histogram update!]]
             [metrics.timers :refer [timer time!]]
-            [com.puppetlabs.jdbc :refer [query-to-vec dashes->underscores]]))
+            [com.puppetlabs.jdbc :refer [query-to-vec dashes->underscores]])
+  (:import [java.sql SQLException]))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;; Schemas
@@ -768,39 +770,57 @@
     ["SELECT id from factsets WHERE certname = ?" certname]
     (:id (first result-set))))
 
+(defn dump-any-sqlexcepton-info-and-rethrow
+  [ex]
+  (try
+    (throw ex)
+    (catch SQLException sqlx
+      (doseq [n (iterate #(.getNextException %) sqlx) :while n]
+        (log/error "deactivate-tracer=====================================" )
+        (log/error n)
+        (let [st (with-out-str (strace/print-stack-trace n))]
+          (log/error n)))
+      (throw sqlx))))
+
 (defn-validated delete-pending-path-id-orphans!
   "Delete candidate-ids that are no longer mentioned by factsets other
   than factset-id."
   [factset-id candidate-ids]
   (when-let [candidate-ids (seq candidate-ids)]
-    (let [in-id-list (jdbc/in-clause candidate-ids)]
-      (sql/do-prepared
-       (format
-        "DELETE FROM fact_paths fp
+    (try
+      (let [in-id-list (jdbc/in-clause candidate-ids)]
+        (sql/do-prepared
+         (format
+          "DELETE FROM fact_paths fp
            WHERE fp.id %s
              AND NOT EXISTS (SELECT 1 FROM facts f
                                WHERE f.fact_path_id %s
                                  AND f.fact_path_id = fp.id
                                  AND f.factset_id <> ?)"
-        in-id-list in-id-list)
-       (flatten [candidate-ids candidate-ids factset-id])))))
+          in-id-list in-id-list)
+         (flatten [candidate-ids candidate-ids factset-id])))
+      (catch Exception ex
+        (dump-any-sqlexcepton-info-and-rethrow ex)))))
 
 (defn-validated delete-pending-value-id-orphans!
   "Delete candidate-ids that are no longer mentioned by factsets other
   than factset-id."
   [factset-id candidate-ids]
   (when-let [candidate-ids (seq candidate-ids)]
-    (let [in-id-list (jdbc/in-clause candidate-ids)]
-      (sql/do-prepared
-       (format
-        "DELETE FROM fact_values fv
+    (try
+      (let [in-id-list (jdbc/in-clause candidate-ids)]
+        (sql/do-prepared
+         (format
+          "DELETE FROM fact_values fv
            WHERE fv.id %s
              AND NOT EXISTS (SELECT 1 FROM facts f
                                WHERE f.fact_value_id %s
                                  AND f.fact_value_id = fv.id
                                  AND f.factset_id <> ?)"
-        in-id-list in-id-list)
-       (flatten [candidate-ids candidate-ids factset-id])))))
+          in-id-list in-id-list)
+         (flatten [candidate-ids candidate-ids factset-id])))
+      (catch Exception ex
+        (dump-any-sqlexcepton-info-and-rethrow ex)))))
 
 ;; NOTE: now only used in tests.
 (defn-validated delete-certname-facts!
