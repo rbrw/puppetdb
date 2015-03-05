@@ -783,12 +783,17 @@
       (throw sqlx))))
 
 (defn-validated delete-pending-path-id-orphans!
-  "Delete candidate-ids that are no longer mentioned by factsets other
-  than factset-id."
-  [factset-id candidate-ids]
-  (when-let [candidate-ids (seq candidate-ids)]
+  "Delete paths in removed-pid-vid-pairs that are no longer
+  mentionedin facts."
+  [factset-id removed-pid-vid-pairs]
+  (when-let [removed-pid-vid-pairs (seq removed-pid-vid-pairs)]
     (try
-      (let [in-id-list (jdbc/in-clause candidate-ids)]
+      (let [pids (map first removed-pid-vid-pairs)
+            fv-id-pairs (map vector
+                             (repeat factset-id )
+                             (map second removed-pid-vid-pairs))
+            in-pids (jdbc/in-clause pids)
+            in-fv-id-pairs (jdbc/in-clause-multi fv-id-pairs 2)]
         (sql/do-prepared
          (format
           "DELETE FROM fact_paths fp
@@ -796,19 +801,24 @@
              AND NOT EXISTS (SELECT 1 FROM facts f
                                WHERE f.fact_path_id %s
                                  AND f.fact_path_id = fp.id
-                                 AND f.factset_id <> ?)"
-          in-id-list in-id-list)
-         (flatten [candidate-ids candidate-ids factset-id])))
+                                 AND (f.factset_id, f.fact_value_id) NOT %s)"
+          in-pids in-pids in-fv-id-pairs)
+         (flatten [pids pids fv-id-pairs])))
       (catch Exception ex
         (dump-any-sqlexcepton-info-and-rethrow ex)))))
 
 (defn-validated delete-pending-value-id-orphans!
-  "Delete candidate-ids that are no longer mentioned by factsets other
-  than factset-id."
-  [factset-id candidate-ids]
-  (when-let [candidate-ids (seq candidate-ids)]
+  "Delete values in removed-pid-vid-pairs that are no longer mentioned
+  in facts."
+  [factset-id removed-pid-vid-pairs]
+  (when-let [removed-pid-vid-pairs (seq removed-pid-vid-pairs)]
     (try
-      (let [in-id-list (jdbc/in-clause candidate-ids)]
+      (let [vids (map second removed-pid-vid-pairs)
+            fp-id-pairs (map vector
+                             (repeat factset-id )
+                             (map first removed-pid-vid-pairs))
+            in-vids (jdbc/in-clause vids)
+            in-fp-id-pairs (jdbc/in-clause-multi fp-id-pairs 2)]
         (sql/do-prepared
          (format
           "DELETE FROM fact_values fv
@@ -816,9 +826,9 @@
              AND NOT EXISTS (SELECT 1 FROM facts f
                                WHERE f.fact_value_id %s
                                  AND f.fact_value_id = fv.id
-                                 AND f.factset_id <> ?)"
-          in-id-list in-id-list)
-         (flatten [candidate-ids candidate-ids factset-id])))
+                                 AND (f.factset_id, f.fact_path_id) NOT %s)"
+          in-vids in-vids in-fp-id-pairs)
+         (flatten [vids vids fp-id-pairs])))
       (catch Exception ex
         (dump-any-sqlexcepton-info-and-rethrow ex)))))
 
@@ -828,20 +838,11 @@
   [certname :- String]
   (sql/transaction
    (let [factset-id (certname-to-factset-id certname)
-         related-pids (map :id (query-to-vec
-                                "SELECT fp.id id FROM facts f
-                                   INNER JOIN fact_paths fp
-                                     ON f.fact_path_id = fp.id
-                                   WHERE factset_id = ?" factset-id))
-         related-vids (map :id (query-to-vec
-                                "SELECT fv.id id FROM facts f
-                                   INNER JOIN fact_values fv
-                                     ON f.fact_value_id = fv.id
-                                   WHERE factset_id = ?" factset-id))]
+         dead-pairs (select-pid-vid-pairs-for-factset factset-id)]
      (sql/do-commands
       (format "DELETE FROM facts WHERE factset_id = %s" factset-id))
-     (delete-pending-path-id-orphans! factset-id related-pids)
-     (delete-pending-value-id-orphans! factset-id related-vids)
+     (delete-pending-path-id-orphans! factset-id dead-pairs)
+     (delete-pending-value-id-orphans! factset-id dead-pairs)
      (sql/delete-rows :factsets ["id=?" factset-id]))))
 
 ;; FIXME: doesn't look like prismatic can handle [[x y]]
@@ -988,13 +989,11 @@
           ;; CAUTION: seq required - currently: (flatten #{[1 2] [3 4]}) => ()
           (flatten [factset-id rm-pairs]))
          (delete-pending-path-id-orphans! factset-id
-                                          (set/difference
-                                           (set (map first rm-pairs))
-                                           (set (map first new-pairs))))
+                                          (set/difference (set rm-pairs)
+                                                          (set new-pairs)))
          (delete-pending-value-id-orphans! factset-id
-                                           (set/difference
-                                            (set (map second rm-pairs))
-                                            (set (map second new-pairs))))))
+                                           (set/difference (set rm-pairs)
+                                                           (set new-pairs)))))
 
      (sql/update-values :factsets ["id=?" factset-id]
                         {:timestamp (to-timestamp timestamp)
