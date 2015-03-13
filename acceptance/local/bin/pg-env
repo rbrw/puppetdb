@@ -1,0 +1,30 @@
+#!/bin/bash
+
+set -euo pipefail
+
+usage() { echo 'Usage: pg-env DIR CMD [ARG...]' 1>&2; }
+
+if test "$#" -lt 2; then
+    usage
+    exit 1
+fi
+
+readonly dir="$1"
+shift
+
+pushd "$dir" > /dev/null
+
+if ! test -d data -a -f pgpass -a -f port; then
+    echo "$dir does not appear to be a postgresql sandbox" 1>&2
+fi
+
+ver="$(cat pg-version)"
+port="$(cat port)"
+readonly ver port
+
+export PGSANDBOX="$(pwd)"
+export PGPASSFILE="$(pwd)/pgpass"
+export PGPORT="${port}"
+export PGHOST=localhost
+popd > /dev/null
+exec "$@"

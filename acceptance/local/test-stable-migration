@@ -1,0 +1,78 @@
+#!/usr/bin/env bash
+
+set -exo pipefail
+
+if test -z "$PDB_ACCTEST_DB_PORT"; then
+    echo "Please set PDB_ACCTEST_DB_PORT" 1>&2
+    exit 1
+fi
+
+name="$(basename $0)"
+script_home="$(cd "$(dirname $0)" && pwd)"
+tbin="$script_home/bin"
+readonly name script_home tbin
+
+top="$(pwd)"
+stable_benchmark_ref=1aafe0637f59bebf39ae61a1125907f5655b1e59
+readonly top stable_benchmark_ref
+
+test -e project.clj
+test -d acceptance
+test -d src/puppetlabs/puppetdb
+
+mkdir -p target/tmp
+tmpdir="$(mktemp -d "$top/target/tmp/$name-XXXXX")"
+readonly tmpdir
+
+declare -a subprocs
+shutdown()
+{
+  cd "$top"
+  for pid in "${subprocs[@]}"; do
+    kill "$pid" || true
+  done
+  sleep 3
+  rm -rf "$tmpdir"
+}
+trap shutdown EXIT
+
+cd "$tmpdir"
+
+git clone --single-branch "$top" stable-benchmark
+git -C stable-benchmark checkout "$stable_benchmark_ref"
+
+"$tbin"/pg-sandbox sandbox "$PDB_ACCTEST_DB_PORT"
+"$tbin"/pg-run sandbox &
+
+while ! test -e sandbox/data/sandbox.pid; do
+  sleep 1
+done
+pg_pid="$(cat sandbox/data/sandbox.pid)"
+subprocs=("${subprocs[@]}" "$pg_pid")
+
+"$tbin"/pg-env sandbox "$tbin"/pg-setup-pdb sandbox
+
+cd stable-benchmark
+
+lein trampoline run services -c ../sandbox/pdb.ini < /dev/null &
+pdb_pid=$!
+subprocs=("${subprocs[@]}" "$pdb_pid")
+echo "Waiting for puppetdb..." 1>&2
+while ! curl -sG http://localhost:8080/v4/nodes; do
+  sleep 5
+done
+
+"$tbin"/pg-env "$tmpdir/sandbox" lein trampoline run benchmark \
+     -F acceptance/benchmark/facts \
+     -n 5 \
+     -N 20 \
+     -r 10 \
+     -c ../sandbox/pdb.ini < /dev/null &
+mark_pid=$!
+subprocs=("${subprocs[@]}" "$mark_pid")
+wait "$mark_pid"
+
+kill "$pdb_pid"
+
+cd "$top"
+lein trampoline run services -c "$tmpdir/sandbox/pdb.ini" < /dev/null

@@ -1,0 +1,40 @@
+#!/bin/bash
+
+set -exuo pipefail
+
+usage() { echo 'Usage: pg-run DIR' 1>&2; }
+
+if test "$#" -ne 1; then
+    usage
+    exit 1
+fi
+
+readonly dir="$1"
+cd "$dir"
+
+if ! test -d data -a -f pgpass -a -f port; then
+    echo "$dir does not appear to be a postgresql sandbox" 1>&2
+    exit 1
+fi
+
+ver="$(cat pg-version)"
+sock_only=''
+readonly ver sock_only
+
+binver="$(postgres -V)"
+binver="${ver/* /}"
+readonly binver
+
+if test "$binver" != "$ver"; then
+    echo "error: postgres version in PATH doesn't match sandbox version" 1>&2
+    echo "$binver != $ver" 1>&2
+    exit 1
+fi
+
+if test "$sock_only"; then
+    listen=''
+else
+  listen=localhost
+fi
+
+postgres -h "$listen" -D data

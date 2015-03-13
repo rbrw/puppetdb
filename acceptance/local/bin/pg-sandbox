@@ -1,0 +1,59 @@
+#!/bin/bash
+
+set -euo pipefail
+
+# This assumes that all the pg bins are in the same directory as postgres.
+
+usage() { echo 'Usage: pg-sandbox DIR PORT' 1>&2; }
+
+if test "$#" -ne 2; then
+    usage
+    exit 1
+fi
+
+dir="$1"
+port="$2"
+readonly dir port
+
+if ! type -p postgres; then
+    echo "Can't find postgres in PATH; add /usr/lib/postgresql/VER/bin or similar" 1>&2
+    exit 1
+fi
+
+ver="$(postgres -V)"
+ver="${ver/* /}"
+readonly ver
+
+mkdir "$dir"
+cd "$dir"
+
+passwd="$(dd if=/dev/urandom bs=1 count=32 | base64)"
+install -m 0600 /dev/null pass
+echo -n "$passwd" > pass
+install -m 0600 /dev/null pgpass
+echo '# hostname:port:database:username:password' > pgpass
+echo "*:*:*:*:$passwd" >> pgpass
+
+mkdir data
+initdb -D data -E UTF8 --locale=C --auth password --pwfile pass
+mkdir data/sock
+
+case "$ver" in
+  8.4*) echo "unix_socket_directory = 'sock'" >> data/postgresql.conf;;
+  *) echo "unix_socket_directories = 'sock'" >> data/postgresql.conf;;
+esac
+
+echo "external_pid_file = 'sandbox.pid'" >> data/postgresql.conf
+
+sock_only=''
+if test "$sock_only"; then
+    listen=''
+else
+  listen=localhost
+fi
+
+# Redundant with -h
+echo "listen_addresses = '$listen'" >> data/postgresql.conf
+echo "port = $port" >> data/postgresql.conf
+echo "$port" > port
+echo "$ver" > pg-version

@@ -1,0 +1,63 @@
+#!/bin/bash
+
+set -exuo pipefail
+
+usage() { echo 'Usage: pg-setup-pdb DIR' 1>&2; }
+
+if test "$#" -ne 1; then
+    usage
+    exit 1
+fi
+
+dir="$1"
+cd "$dir"
+absdir="$(pwd)"
+readonly absdir dir
+
+pass="$(cat pass)"
+port="$(cat port)"
+ver="$(cat pg-version)"
+readonly pass port ver
+
+createuser -DRS puppetdb
+
+tmp_cmds="$(mktemp ./tmp-cmds-XXXXX)"
+trap "rm -f '$tmp_cmds'" EXIT
+echo -n "alter role puppetdb with password '" > "$tmp_cmds"
+cat pass >> "$tmp_cmds"
+echo "';" >> "$tmp_cmds"
+psql -f "$tmp_cmds" postgres
+
+createdb -E UTF8 -O puppetdb puppetdb
+
+case "$ver" in
+  8.4*) true;;
+  *) psql puppetdb -c 'create extension pg_trgm';;
+esac
+
+mkdir -p "$absdir/var"
+
+cat > pdb.ini <<EOF
+[global]
+
+vardir = $absdir/var
+
+[database]
+username = puppetdb
+classname = org.postgresql.Driver
+subprotocol = postgresql
+subname = //localhost:${port}/puppetdb
+password = ${pass}
+
+[repl]
+enabled = false
+
+[jetty]
+host = 0.0.0.0
+port = 8080
+ssl-host = 0.0.0.0
+ssl-port = 8081
+ssl-ca-cert = /home/rlb/.puppet/ssl/certs/ca.pem
+ssl-cert = /home/rlb/.puppet/ssl/certs/foo.pem
+ssl-key = /home/rlb/.puppet/ssl/private_keys/foo.pem
+EOF
