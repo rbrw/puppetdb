@@ -1236,5 +1236,6 @@
    ;; These require serializable because they make the decision to
    ;; delete based on row counts in another table.
    (jdbc/with-transacted-connection' db :serializable
-     (sql/transaction (delete-orphaned-paths! *orphaned-path-gc-limit*))
+     (sql/transaction (delete-orphaned-paths! *orphaned-path-gc-limit*)))
+   (jdbc/with-transacted-connection' db :serializable
      (sql/transaction (delete-orphaned-values! *orphaned-value-gc-limit*)))))
