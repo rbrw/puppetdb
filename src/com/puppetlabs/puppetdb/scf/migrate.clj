@@ -938,11 +938,6 @@
        fact_path_id bigint NOT NULL,
        fact_value_id bigint NOT NULL)"
 
-   ;; FIXME: indexes duplicated with constraints at the end of this function.
-   ;; Needed for the insert if nothing else.
-   "CREATE INDEX fact_paths_path_idx on fact_paths(path)"
-   "CREATE INDEX fact_values_value_hash_idx on fact_values(value_hash)"
-
    ;; Patch up facts refrences to refer to the min id path/value
    ;; wherever there's more than one option.
    "INSERT INTO facts_transform (factset_id, fact_path_id, fact_value_id)
