@@ -988,8 +988,8 @@
      (when rm-pairs
        (delete-pending-path-id-orphans! factset-id
                                         (set/difference
-                                         (set (map first current-pairs))
-                                         (set (map first replacement-pv-pairs))))
+                                         (set (map first rm-pairs))
+                                         (set (map first new-pairs))))
        (delete-pending-value-id-orphans! factset-id rm-pairs))
 
      (sql/update-values :factsets ["id=?" factset-id]
