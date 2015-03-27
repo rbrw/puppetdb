@@ -926,8 +926,13 @@
    "DROP INDEX fact_values_value_hash_idx"
    "ALTER TABLE fact_paths
       ADD CONSTRAINT fact_paths_path_key UNIQUE (path)"
-   "ALTER TABLE fact_values
-      ADD CONSTRAINT fact_values_value_hash_key UNIQUE (value_hash)"
+
+   (let [opt-deferrable (if (and (scf-utils/postgres?)
+                                 (scf-utils/db-version-newer-than? [9 0]))
+                          "DEFERRABLE" "")]
+     (format "ALTER TABLE fact_values
+                ADD CONSTRAINT fact_values_value_hash_key UNIQUE (value_hash)
+                  %s" opt-deferrable))
 
    "CREATE TABLE facts_transform
       (factset_id bigint NOT NULL,

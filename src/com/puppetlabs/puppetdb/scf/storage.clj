@@ -928,6 +928,10 @@
   [{:keys [name values environment timestamp producer-timestamp] :as fact-data}
    :- facts-schema]
   (sql/transaction
+   (sql/do-commands ;; To reduce the window of contention for realize-values!
+    (if (sutils/postgres?)
+      "SET CONSTRAINTS ALL DEFERRED" ;; In case it allows additional optimization?
+      "SELECT 1"))
    (sql/insert-record :factsets
                       {:certname name
                        :timestamp (to-timestamp timestamp)
@@ -954,6 +958,10 @@
    :- facts-schema]
 
   (sql/transaction
+   (sql/do-commands ;; To reduce the window of contention for realize-values!
+    (if (sutils/postgres?)
+      "SET CONSTRAINTS ALL DEFERRED" ;; In case it allows additional optimization?
+      "SELECT 1"))
    (let [factset-id (certname-to-factset-id name)
          initial-factset-paths-vhashes
          (query-to-vec "SELECT fp.path, fv.value_hash FROM facts f
