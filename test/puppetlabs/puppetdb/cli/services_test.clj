@@ -2,6 +2,7 @@
   (:import [java.security KeyStore])
   (:require [me.raynes.fs :as fs]
             [clj-http.client :as client]
+            [puppetlabs.puppetdb.testutils :refer [without-jmx]]
             [puppetlabs.puppetdb.meta.version :as v]
             [puppetlabs.trapperkeeper.testutils.logging :refer [with-log-output logs-matching]]
             [puppetlabs.puppetdb.cli.services :refer :all]
@@ -157,3 +158,9 @@
                    :environment "DEV",
                    :certname "foo.local"}}
                 (set result))))))))
+
+(deftest whats-up-with-logging
+  (without-jmx
+   (svc-utils/with-puppetdb-instance
+     (svc-utils/with-puppetdb-instance
+       (Thread/sleep 10000)))))

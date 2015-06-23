@@ -364,7 +364,12 @@
    [:ShutdownService shutdown-on-error]]
 
   (start [this context]
-         (start-puppetdb context (get-config) this add-ring-handler get-route shutdown-on-error))
+    (log/error "show me the log")
+    (let [context (start-puppetdb context (get-config) this add-ring-handler get-route shutdown-on-error)]
+      (future
+        (Thread/sleep 5000)
+        (log/error "is every message that looks like this in the same log?"))
+      context))
 
   (stop [this context]
         (stop-puppetdb context false))
