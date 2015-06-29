@@ -191,6 +191,8 @@
      (exponential-sleep! current 1.3)
      false)))
 
+(def shutting-down? (atom false))
+
 (pls/defn-validated retry-sql*
   "Executes f. If an exception is thrown, will retry. At most n retries
    are done. If still some retryable error state is thrown it is bubbled upwards
@@ -201,14 +203,14 @@
          current 0]
     (if-let [result (try
                       [(f)]
-
                       ;; This includes org.postgresql.util.PSQLException
                       (catch java.sql.SQLException e
                         (let [sqlstate (.getSQLState e)]
                           (case sqlstate
                             ;; Catch connection errors and retry them
-                            "08003" (retry-sql-or-fail r current e)
-
+                            "08003" (if @shutting-down?
+                                      (throw (Exception. "DIE!!!"))
+                                      (retry-sql-or-fail r current e))
                             ;; All other errors are not retried
                             (throw e)))))]
       (result 0)
@@ -302,7 +304,9 @@
                           (.setJdbcUrl (str "jdbc:" subprotocol ":" subname))
                           (.setConnectionHook (connection-hook log-statements log-slow-statements-duration))
                           (.setStatementsCacheSize statements-cache-size)
-                          (.setDefaultReadOnly read-only?))
+                          (.setDefaultReadOnly read-only?)
+                          (.setAcquireRetryAttempts 0)
+                          (.setConnectionTimeoutInMs 1000))
         user (or user username)]
     ;; configurable without default
     (when user (.setUsername config (str user)))

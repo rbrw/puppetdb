@@ -1,6 +1,7 @@
 (ns puppetlabs.puppetdb.mq-listener
   (:import [javax.jms ExceptionListener JMSException MessageListener Session])
   (:require [clojure.tools.logging :as log]
+            [puppetlabs.puppetdb.jdbc :as jdbc]
             [puppetlabs.puppetdb.command.dlo :as dlo]
             [puppetlabs.puppetdb.mq :as mq]
             [puppetlabs.kitchensink.core :as kitchensink]
@@ -381,6 +382,7 @@
              :receivers receivers)))
 
   (stop [this {:keys [factory connection receivers] :as context}]
+    (reset! jdbc/shutting-down? true)
     (doseq [{:keys [session producer consumer]} receivers]
       (.close producer)
       (.close consumer)
