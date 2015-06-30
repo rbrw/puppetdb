@@ -12,6 +12,23 @@
             [clojure.walk :refer  [keywordize-keys]]
             [schema.core :as s]))
 
+(defn-validated command-post-info
+  ([base-url
+    command :- s/Str
+    version :- s/Int
+    payload]
+   (->> payload
+        (command/assemble-command command version)
+        (command-post-info base-url)))
+  ([base-url :- utils/base-url-schema
+    command-map :- {s/Any s/Any}]
+   (let [message (json/generate-string command-map)
+         checksum (kitchensink/utf8-string->sha1 message)]
+     {:url (str (utils/base-url->str base-url)
+                (format "/commands?checksum=%s" checksum))
+      :body message
+      :checksum checksum})))
+
 (defn-validated submit-command-via-http!
   "Submits `payload` as a valid command of type `command` and
   `version` to the PuppetDB instance specified by `host` and

@@ -47,6 +47,7 @@
             [puppetlabs.kitchensink.core :as kitchensink]
             [clj-time.core :as time]
             [puppetlabs.puppetdb.client :as client]
+            [puppetlabs.puppetdb.command.constants :refer [command-names]]
             [puppetlabs.puppetdb.random :refer [random-string random-bool]]
             [puppetlabs.puppetdb.archive :as archive]
             [slingshot.slingshot :refer [try+ throw+]]))
@@ -136,7 +137,7 @@
 
 (defn update-report
   "configuration_version, start_time and end_time should always change
-   on subsequent report submittions, this changes those fields to avoid
+   on subsequent report submissions, this changes those fields to avoid
    computing the same hash again (causing constraint errors in the DB)"
   [report stamp]
   (-> report
@@ -231,12 +232,12 @@
              :factset factset
              :catalog catalog))))
 
-(defn update-host
+(defn new-entities
   "Submit a `catalog` for `hosts` (when present), possibly mutating it before
    submission.  Also submit a report for the host (if present). This is
    similar to timed-update-host, but always sends the update (doesn't run/skip
    based on the clock)"
-  [{:keys [catalog report factset] :as state} base-url rand-percentage current-time]
+  [{:keys [catalog report factset] :as state} rand-percentage current-time]
   (let [stamp (jitter current-time 1800)
         catalog (some-> catalog
                         (update-catalog rand-percentage stamp))
@@ -244,25 +245,24 @@
                        (update-report stamp))
         factset (some-> factset
                         (update-factset rand-percentage stamp))]
-    (when catalog (client/submit-catalog base-url 6 (json/generate-string catalog)))
-    (when report (client/submit-report base-url 5 (json/generate-string report)))
-    (when factset (client/submit-facts base-url 4 (json/generate-string factset)))
-    (assoc state
-           :catalog catalog
-           :factset factset)))
+    {:catalog catalog
+     :report report
+     :factset factset}))
 
-(defn submit-n-messages
+(defn for-n-messages-per-host
   "Given a list of host maps, send `num-messages` to each host.  The function
    is recursive to accumulate possible catalog mutations (i.e. changing a previously
    mutated catalog as opposed to different mutations of the same catalog)."
-  [hosts num-msgs base-url rand-percentage]
-  (log/infof "Sending %s messages for %s hosts, will exit upon completion"
-             num-msgs (count hosts))
+  [f num-msgs hosts rand-percentage]
   (loop [mutated-hosts hosts
          msgs-to-send num-msgs
          stamp (time/minus (time/now) (time/minutes (* 30 num-msgs)))]
     (when-not (zero? msgs-to-send)
-      (recur (mapv #(update-host % base-url rand-percentage stamp) mutated-hosts)
+      (recur (mapv (fn [host]
+                     (let [new (new-entities host rand-percentage stamp)]
+                       (f new)
+                       (merge host new)))
+                   mutated-hosts)
              (dec msgs-to-send)
              (time/plus stamp (time/minutes 30))))))
 
@@ -318,7 +318,16 @@
                 :default 0
                 :parse-fn #(Integer/parseInt %)]
                ["-N" "--nummsgs NUMMSGS" "Number of commands and/or reports to send for each host"
-                :parse-fn #(Long/valueOf %)]]
+                :parse-fn #(Long/valueOf %)]
+               [nil
+                "--submit" "Submit entities to the remote server (default behavior)"
+                :default true]
+               [nil "--no-submit" "Don't submit entities to the remote server"
+                :assoc-fn (fn [m k _] (assoc m :submit false))]
+               [nil "--urls DIR" "Print command URLs to standard output"
+                :default false]
+               [nil "--no-urls" "Don't print command URLs to standard output"
+                :assoc-fn (fn [m k _] (assoc m :urls false))]]
         required [:config :numhosts]]
     (utils/try+-process-cli!
      (fn []
@@ -357,9 +366,21 @@
                                   [data-paths false])]
       (kitchensink/mapvals #(some-> % (load-sample-data from-cp?)) data-paths))))
 
+
+
+(defn- add-siege-url [dir url-stream base-url command version entity]
+  (let [{:keys [url body checksum]}
+        (client/command-post-info base-url (command-names command) version
+                                  (json/generate-string entity))]
+    (spit (str dir "/body/" checksum) body)
+    (binding [*out* url-stream]
+      (printf "%s POST <%s\n" url (str "body/" checksum)))))
+
+
 (defn -main
   [& args]
-  (let [{:keys [config rand-perc numhosts nummsgs] :as options} (validate-cli! args)
+  (let [{:keys [config rand-perc numhosts nummsgs submit urls] :as options}
+        (validate-cli! args)
         _ (logutils/configure-logging! (get-in config [:global :logging-config]))
         {:keys [catalogs reports facts]} (load-data-from-options options)
         {pdb-host :host pdb-port :port
@@ -377,13 +398,49 @@
                                   (update catalog "resources" (partial map #(update % "tags" conj pdb-host))))
                        :report (get-random-entity host reports)
                        :factset (get-random-entity host facts)}))
-        hosts (map make-host (range numhosts))]
-
-    (when-not catalogs (log/info "No catalogs specified; skipping catalog submission"))
-    (when-not reports (log/info "No reports specified; skipping report submission"))
-    (when-not facts (log/info "No facts specified; skipping fact submission"))
+        hosts (map make-host (range numhosts))
+        submit-entities (fn [{:keys [catalog report factset]}]
+                          (when catalog
+                            (client/submit-catalog
+                             base-url 6 (json/generate-string catalog)))
+                          (when report
+                            (client/submit-report
+                             base-url 5 (json/generate-string report)))
+                          (when factset
+                            (client/submit-facts
+                             base-url 4 (json/generate-string factset))))
+        save-urls (fn [url-stream {:keys [catalog report factset]}]
+                    (when catalog
+                       (add-siege-url urls url-stream base-url
+                                      :replace-catalog 6 catalog))
+                     (when report
+                       (add-siege-url urls url-stream base-url
+                                      :store-report 5 report))
+                     (when factset
+                       (add-siege-url urls url-stream base-url
+                                      :replace-facts 4 factset)))]
+    (when-not catalogs (log/info "No catalogs specified; skipping catalogs"))
+    (when-not reports (log/info "No reports specified; skipping reports"))
+    (when-not facts (log/info "No facts specified; skipping facts"))
+    ;; FIXME: check for conflicts with --url/--no-url and --submit/--no-submit
     (if nummsgs
-      (submit-n-messages hosts nummsgs base-url rand-perc)
+      (do
+        (when submit
+          (log/infof "Sending %s messages for %s hosts, will exit upon completion"
+                     nummsgs (count hosts)))
+        (if-not urls
+          (for-n-messages-per-host #(when submit (submit-entities %))
+                                   nummsgs hosts rand-perc)
+          (do
+            (log/infof "Saving siege data to %s" urls)
+            (assert (.mkdir (java.io.File. urls)))
+            (assert (.mkdir (java.io.File. (str urls "/body"))))
+            (with-open [url-stream (io/writer (str urls "/urls.txt"))]
+              (for-n-messages-per-host
+               (fn [entities]
+                 (when submit (submit-entities entities))
+                 (save-urls url-stream entities))
+               nummsgs hosts rand-perc)))))
       (let [run-interval (time/minutes (:runinterval options))
             rand-lastrun (fn [run-interval]
                            (jitter (time/minus (time/now) run-interval)
