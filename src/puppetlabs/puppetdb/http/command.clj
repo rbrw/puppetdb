@@ -38,9 +38,10 @@
 
 (defn enqueue-command-handler
   "Enqueues the command in request and returns a UUID"
-  [enqueue-fn connection endpoint]
+  [get-command-mq enqueue-fn]
   (fn [{:keys [body-string] :as request}]
-    (let [uuid (enqueue-fn connection endpoint body-string)]
+    (let [{:keys [connection endpoint]} (get-command-mq)
+          uuid (enqueue-fn connection endpoint body-string)]
       (http/json-response {:uuid uuid}))))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -50,21 +51,18 @@
 ;; return functions that accept a ring request map
 
 (defn command-app
-  [{:keys [command-mq authorizer] :as globals} enqueue-fn]
-  (let [{:keys [connection endpoint]} command-mq
-        app (moustache/app
-             ["v1" &] {:any (enqueue-command-handler enqueue-fn
-                                                     connection endpoint)})]
-    (-> app
-        validate-command-version
-        mid/verify-accepts-json
-        mid/verify-checksum
-        (mid/validate-query-params {:optional ["checksum"]})
-        mid/payload-to-body-string
-        (mid/verify-content-type ["application/json"])
-        (mid/wrap-with-puppetdb-middleware authorizer)
-        (mid/wrap-with-metrics (atom {}) http/leading-uris)
-        (mid/wrap-with-globals globals))))
+  [get-authorizer get-command-mq get-shared-globals enqueue-fn]
+  (-> (moustache/app
+       ["v1" &] {:any (enqueue-command-handler get-command-mq enqueue-fn)})
+      validate-command-version
+      mid/verify-accepts-json
+      mid/verify-checksum
+      (mid/validate-query-params {:optional ["checksum"]})
+      mid/payload-to-body-string
+      (mid/verify-content-type ["application/json"])
+      (mid/wrap-with-puppetdb-middleware get-authorizer)
+      (mid/wrap-with-metrics (atom {}) http/leading-uris)
+      (mid/wrap-with-globals get-shared-globals)))
 
 (defprotocol PuppetDBCommand
   (submit-command [this command version payload]))
