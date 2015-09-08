@@ -2,7 +2,7 @@
   (:require [cheshire.core :as json]
             [clj-time.coerce :refer [to-timestamp to-string]]
             [clj-time.core :refer [now]]
-            [clojure.java.jdbc.deprecated :as sql]
+            [clojure.java.jdbc :as sql]
             [clojure.java.io :as io]
             [clojure.test :refer :all]
             [flatland.ordered.map :as omap]
@@ -13,7 +13,7 @@
             [puppetlabs.puppetdb.fixtures :refer :all]
             [puppetlabs.puppetdb.http :as http]
             [puppetlabs.puppetdb.http.server :as server]
-            [puppetlabs.puppetdb.jdbc :refer [with-transacted-connection]]
+            [puppetlabs.puppetdb.jdbc :as jdbc]
             [puppetlabs.puppetdb.testutils :refer [get-request
                                                    assert-success!
                                                    paged-results
@@ -453,19 +453,12 @@
                                  :product-name "puppetdb"))
     nil)))
 
-(defn with-shutdown-after [dbs f]
-  (f)
-  (doseq [db dbs]
-    (sql/with-connection db
-      (sql/do-commands "SHUTDOWN"))
-    (.close (:datasource db))))
-
 (defmacro with-shutdown-after
   [dbs & body]
   `(do ~@body)
   `(doseq [db# ~dbs]
-     (sql/with-connection db#
-       (sql/do-commands "SHUTDOWN"))
+     (jdbc/with-db-connection db#
+       (jdbc/do-commands "SHUTDOWN"))
      (.close (:datasource db#))))
 
 (deftestseq fact-queries
@@ -492,7 +485,7 @@
                 "kernel" "Linux"
                 "operatingsystem" "RedHat"
                 "uptime_seconds" 6000}]
-    (with-transacted-connection *db*
+    (jdbc/with-transacted-connection *db*
       (scf-store/add-certname! "foo1")
       (scf-store/add-certname! "foo2")
       (scf-store/add-certname! "foo3")
@@ -620,7 +613,7 @@
                           "some_version" "1.3.7+build.11.e0f985a"
                           "uptime_seconds" "4000"}]
 
-              (with-transacted-connection write-db
+              (jdbc/with-transacted-connection write-db
                 (scf-store/add-certname! "foo1")
                 (scf-store/add-facts! {:certname "foo1"
                                        :values facts1
@@ -679,7 +672,7 @@
                 "kernel" "Linux"
                 "operatingsystem" "RedHat"
                 "uptime_seconds" "6000"}]
-    (with-transacted-connection *db*
+    (jdbc/with-transacted-connection *db*
       (scf-store/add-certname! "foo1")
       (scf-store/add-certname! "foo2")
       (scf-store/add-facts! {:certname "foo1"
@@ -952,7 +945,7 @@
                   "kernel" "Linux"
                   "operatingsystem" "RedHat"
                   "uptime_seconds" "6000"}]
-      (with-transacted-connection *db*
+      (jdbc/with-transacted-connection *db*
         (scf-store/add-certname! "foo1")
         (scf-store/add-certname! "foo2")
         (scf-store/add-certname! "foo3")
@@ -1026,7 +1019,7 @@
                 "domain" "testing.com"
                 "hostname" "foo4"
                 "uptime_seconds" "6000"}]
-    (with-transacted-connection *db*
+    (jdbc/with-transacted-connection *db*
       (scf-store/add-certname! "foo1")
       (scf-store/add-certname! "foo2")
       (scf-store/add-certname! "foo3")
@@ -1512,7 +1505,7 @@
                 "domain" "testing.com"
                 "hostname" "foo4"
                 "uptime_seconds" 6000}]
-    (with-transacted-connection *db*
+    (jdbc/with-transacted-connection *db*
       (scf-store/add-certname! "foo1")
       (scf-store/add-certname! "foo2")
       (scf-store/add-certname! "foo3")

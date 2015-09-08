@@ -1,9 +1,10 @@
 (ns puppetlabs.puppetdb.query.resources-test
   (:require [puppetlabs.puppetdb.query-eng :as eng]
-            [clojure.java.jdbc.deprecated :as sql]
+            [clojure.java.jdbc :as sql]
             [puppetlabs.puppetdb.scf.storage :refer [ensure-environment]]
             [clojure.test :refer :all]
-            [puppetlabs.puppetdb.fixtures :refer :all]
+            [puppetlabs.puppetdb.fixtures :refer [*db* with-test-db]]
+            [puppetlabs.puppetdb.jdbc :as jdbc]
             [puppetlabs.puppetdb.testutils :as utils]
             [puppetlabs.puppetdb.scf.storage-utils :as sutils :refer [db-serialize to-jdbc-varchar-array]]
             [clj-time.coerce :refer [to-timestamp]]
@@ -21,7 +22,7 @@
                            ""))
 
 (deftest test-query-resources
-  (sql/insert-records
+  (jdbc/insert!
    :resource_params_cache
    {:resource (sutils/munge-hash-for-storage "01") :parameters (db-serialize {"ensure" "file"
                                                                                  "owner"  "root"
@@ -35,7 +36,7 @@
    {:resource (sutils/munge-hash-for-storage "07") :parameters (db-serialize {"hash" {"foo" 5 "bar" 10}})}
    {:resource (sutils/munge-hash-for-storage "08") :parameters nil})
 
-  (sql/insert-records
+  (jdbc/insert!
    :resource_params
    {:resource (sutils/munge-hash-for-storage "01") :name "ensure"  :value (db-serialize "file")}
    {:resource (sutils/munge-hash-for-storage "01") :name "owner"   :value (db-serialize "root")}
@@ -48,11 +49,11 @@
    {:resource (sutils/munge-hash-for-storage "06") :name "multi"   :value (db-serialize ["one" "two" "three"])}
    {:resource (sutils/munge-hash-for-storage "07") :name "hash"    :value (db-serialize {"foo" 5 "bar" 10})})
 
-  (sql/insert-records
+  (jdbc/insert!
    :certnames
    {:certname "example.local"}
    {:certname "subset.local"})
-  (sql/insert-records
+  (jdbc/insert!
    :catalogs
    {:id 1 :hash (sutils/munge-hash-for-storage "f000") :api_version 1 :catalog_version "12"
     :certname "example.local" :environment_id (ensure-environment "DEV")
@@ -60,18 +61,19 @@
    {:id 2 :hash (sutils/munge-hash-for-storage "ba") :api_version 1 :catalog_version "14" :certname "subset.local"
     :environment_id nil :producer_timestamp (to-timestamp (now))})
 
-  (sql/insert-records :catalog_resources
-                      {:catalog_id 1 :resource (sutils/munge-hash-for-storage "01") :type "File" :title "/etc/passwd" :exported true :tags (to-jdbc-varchar-array []) :file "a" :line 1}
-                      {:catalog_id 1 :resource (sutils/munge-hash-for-storage "02") :type "Notify" :title "hello" :exported true :tags (to-jdbc-varchar-array []) :file "a" :line 2}
-                      {:catalog_id 1 :resource (sutils/munge-hash-for-storage "03") :type "Notify" :title "no-params" :exported true :tags (to-jdbc-varchar-array []) :file "c" :line 1}
-                      {:catalog_id 1 :resource (sutils/munge-hash-for-storage "04") :type "File" :title "/etc/Makefile" :exported false :tags (to-jdbc-varchar-array ["vivid"]) :file "d" :line 1}
-                      {:catalog_id 1 :resource (sutils/munge-hash-for-storage "05") :type "Notify" :title "booyah" :exported false :tags (to-jdbc-varchar-array []) :file "d" :line 2}
-                      {:catalog_id 1 :resource (sutils/munge-hash-for-storage "06") :type "Mval" :title "multivalue" :exported false :tags (to-jdbc-varchar-array []) :file "e" :line 1}
-                      {:catalog_id 1 :resource (sutils/munge-hash-for-storage "07") :type "Hval" :title "hashvalue" :exported false :tags (to-jdbc-varchar-array []) :file "f" :line 1}
-                      {:catalog_id 1 :resource (sutils/munge-hash-for-storage "08") :type "Notify" :title "semver" :exported false :tags (to-jdbc-varchar-array ["1.3.7+build.11.e0f985a"]) :file "f" :line 1}
-                      {:catalog_id 2 :resource (sutils/munge-hash-for-storage "01") :type "File" :title "/etc/passwd" :exported true :tags (to-jdbc-varchar-array []) :file "b" :line 1}
-                      {:catalog_id 2 :resource (sutils/munge-hash-for-storage "03") :type "Notify" :title "no-params" :exported false :tags (to-jdbc-varchar-array []) :file "c" :line 2}
-                      {:catalog_id 2 :resource (sutils/munge-hash-for-storage "05") :type "Notify" :title "booyah" :exported false :tags (to-jdbc-varchar-array []) :file "d" :line 3})
+  (jdbc/insert!
+   :catalog_resources
+   {:catalog_id 1 :resource (sutils/munge-hash-for-storage "01") :type "File" :title "/etc/passwd" :exported true :tags (to-jdbc-varchar-array []) :file "a" :line 1}
+   {:catalog_id 1 :resource (sutils/munge-hash-for-storage "02") :type "Notify" :title "hello" :exported true :tags (to-jdbc-varchar-array []) :file "a" :line 2}
+   {:catalog_id 1 :resource (sutils/munge-hash-for-storage "03") :type "Notify" :title "no-params" :exported true :tags (to-jdbc-varchar-array []) :file "c" :line 1}
+   {:catalog_id 1 :resource (sutils/munge-hash-for-storage "04") :type "File" :title "/etc/Makefile" :exported false :tags (to-jdbc-varchar-array ["vivid"]) :file "d" :line 1}
+   {:catalog_id 1 :resource (sutils/munge-hash-for-storage "05") :type "Notify" :title "booyah" :exported false :tags (to-jdbc-varchar-array []) :file "d" :line 2}
+   {:catalog_id 1 :resource (sutils/munge-hash-for-storage "06") :type "Mval" :title "multivalue" :exported false :tags (to-jdbc-varchar-array []) :file "e" :line 1}
+   {:catalog_id 1 :resource (sutils/munge-hash-for-storage "07") :type "Hval" :title "hashvalue" :exported false :tags (to-jdbc-varchar-array []) :file "f" :line 1}
+   {:catalog_id 1 :resource (sutils/munge-hash-for-storage "08") :type "Notify" :title "semver" :exported false :tags (to-jdbc-varchar-array ["1.3.7+build.11.e0f985a"]) :file "f" :line 1}
+   {:catalog_id 2 :resource (sutils/munge-hash-for-storage "01") :type "File" :title "/etc/passwd" :exported true :tags (to-jdbc-varchar-array []) :file "b" :line 1}
+   {:catalog_id 2 :resource (sutils/munge-hash-for-storage "03") :type "Notify" :title "no-params" :exported false :tags (to-jdbc-varchar-array []) :file "c" :line 2}
+   {:catalog_id 2 :resource (sutils/munge-hash-for-storage "05") :type "Notify" :title "booyah" :exported false :tags (to-jdbc-varchar-array []) :file "d" :line 3})
   (let [foo1 {:certname   "example.local"
               :resource   (sutils/munge-hash-for-storage "01")
               :type       "File"
@@ -261,7 +263,7 @@
               (str "  " input " =>\n  " expect)))))))
 
 (deftest paging-results
-  (sql/insert-records
+  (jdbc/insert!
    :resource_params_cache
    {:resource (sutils/munge-hash-for-storage "01") :parameters (db-serialize {"ensure" "file"
                                                                                 "owner"  "root"
@@ -272,7 +274,7 @@
                                                                                 "multi" ["one" "two" "three"]})}
    {:resource (sutils/munge-hash-for-storage "04") :parameters (db-serialize {"ensure"  "present"
                                                                                 "content" "contents"})})
-  (sql/insert-records
+  (jdbc/insert!
    :resource_params
    {:resource (sutils/munge-hash-for-storage "01") :name "ensure"  :value (db-serialize "file")}
    {:resource (sutils/munge-hash-for-storage "01") :name "owner"   :value (db-serialize "root")}
@@ -284,17 +286,17 @@
    {:resource (sutils/munge-hash-for-storage "04") :name "content" :value (db-serialize "contents")}
    {:resource (sutils/munge-hash-for-storage "02") :name "enabled" :value (db-serialize "false")})
 
-  (sql/insert-records :certnames
-                      {:certname "foo.local"})
-  (sql/insert-records :catalogs
-                      {:id 1 :hash (sutils/munge-hash-for-storage "f000") :api_version 1 :catalog_version "12"
-                       :certname "foo.local" :environment_id (ensure-environment "DEV")
-                       :producer_timestamp (to-timestamp (now))})
-  (sql/insert-records :catalog_resources
-                      {:catalog_id 1 :resource (sutils/munge-hash-for-storage "01") :type "File" :title "alpha"   :exported true  :tags (to-jdbc-varchar-array []) :file "a" :line 1}
-                      {:catalog_id 1 :resource (sutils/munge-hash-for-storage "02") :type "File" :title "beta"    :exported true  :tags (to-jdbc-varchar-array []) :file "a" :line 4}
-                      {:catalog_id 1 :resource (sutils/munge-hash-for-storage "03") :type "File" :title "charlie" :exported true  :tags (to-jdbc-varchar-array []) :file "c" :line 2}
-                      {:catalog_id 1 :resource (sutils/munge-hash-for-storage "04") :type "File" :title "delta"   :exported false :tags (to-jdbc-varchar-array []) :file "d" :line 3})
+  (jdbc/insert! :certnames {:certname "foo.local"})
+  (jdbc/insert!
+   :catalogs
+   {:id 1 :hash (sutils/munge-hash-for-storage "f000") :api_version 1 :catalog_version "12"
+    :certname "foo.local" :environment_id (ensure-environment "DEV")
+    :producer_timestamp (to-timestamp (now))})
+  (jdbc/insert! :catalog_resources
+   {:catalog_id 1 :resource (sutils/munge-hash-for-storage "01") :type "File" :title "alpha"   :exported true  :tags (to-jdbc-varchar-array []) :file "a" :line 1}
+   {:catalog_id 1 :resource (sutils/munge-hash-for-storage "02") :type "File" :title "beta"    :exported true  :tags (to-jdbc-varchar-array []) :file "a" :line 4}
+   {:catalog_id 1 :resource (sutils/munge-hash-for-storage "03") :type "File" :title "charlie" :exported true  :tags (to-jdbc-varchar-array []) :file "c" :line 2}
+   {:catalog_id 1 :resource (sutils/munge-hash-for-storage "04") :type "File" :title "delta"   :exported false :tags (to-jdbc-varchar-array []) :file "d" :line 3})
 
   (let [r1 {:certname "foo.local" :resource (sutils/munge-hash-for-storage "01") :type "File" :title "alpha"   :tags [] :exported true  :file "a" :line 1 :environment "DEV" :parameters {"ensure" "file" "group" "root" "owner" "root"}}
         r2 {:certname "foo.local" :resource (sutils/munge-hash-for-storage "02") :type "File" :title "beta"    :tags [] :exported true  :file "a" :line 4 :environment "DEV" :parameters {"enabled" "false" "random" "true"}}

@@ -1,14 +1,15 @@
 (ns puppetlabs.puppetdb.query.nodes-test
   (:require [clojure.set :as set]
             [puppetlabs.puppetdb.query-eng :as eng]
-            [clojure.java.jdbc.deprecated :as sql]
+            [clojure.java.jdbc :as sql]
             [puppetlabs.puppetdb.scf.storage :as scf-store]
             [puppetlabs.puppetdb.scf.storage-utils :as sutils]
             [clojure.test :refer :all]
             [clj-time.core :refer [now ago days minus]]
             [clj-time.coerce :refer [to-timestamp]]
             [clojure.math.combinatorics :refer [combinations]]
-            [puppetlabs.puppetdb.fixtures :refer :all]))
+            [puppetlabs.puppetdb.fixtures :refer [*db* with-test-db]]
+            [puppetlabs.puppetdb.jdbc :as jdbc]))
 
 (use-fixtures :each with-test-db)
 
@@ -52,9 +53,8 @@
 
 (deftest query-nodes
   (let [timestamp (to-timestamp (now))]
-    (sql/insert-records
-     :environments
-     {:environment "production"})
+    (jdbc/insert! :environments
+                  {:environment "production"})
 
     (doseq [name names]
       (scf-store/add-certname! name))
@@ -117,17 +117,20 @@
                                                   [5 "node_e" "e0" 5 2]]]
       (let [factset-timestamp (to-timestamp (-> facts-age days ago))
             catalog-timestamp (to-timestamp (minus right-now (-> catalog-age days)))]
-        (sql/insert-record :certnames {:certname node})
-        (sql/insert-record :factsets {:certname node
-                                      :timestamp factset-timestamp
-                                      :producer_timestamp factset-timestamp})
-        (sql/insert-record :catalogs {:id id
-                                      :hash (sutils/munge-hash-for-storage hash)
-                                      :api_version 0
-                                      :catalog_version 0
-                                      :certname node
-                                      :timestamp catalog-timestamp
-                                      :producer_timestamp catalog-timestamp}))))
+        (jdbc/insert! :certnames
+                      {:certname node})
+        (jdbc/insert! :factsets
+                      {:certname node
+                       :timestamp factset-timestamp
+                       :producer_timestamp factset-timestamp})
+        (jdbc/insert! :catalogs
+                      {:id id
+                       :hash (sutils/munge-hash-for-storage hash)
+                       :api_version 0
+                       :catalog_version 0
+                       :certname node
+                       :timestamp catalog-timestamp
+                       :producer_timestamp catalog-timestamp}))))
 
   (let [version [:v4]]
 
