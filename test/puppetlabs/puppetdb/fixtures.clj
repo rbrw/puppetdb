@@ -17,7 +17,7 @@
             [puppetlabs.puppetdb.scf.migrate :refer [migrate!]]
             [puppetlabs.puppetdb.middleware :as mid]))
 
-(def ^:dynamic *db* nil) ;; FIXME: perhaps this should be *db-spec* (cf db.clj)?
+(def ^:dynamic *db-spec* nil)
 (def ^:dynamic *mq* nil)
 (def ^:dynamic *app* nil)
 (def ^:dynamic *command-app* nil)
@@ -29,28 +29,28 @@
 (defn with-db-metadata
   "A fixture to collect DB type and version information before a test."
   [f]
-  (binding [*db* (clean-db-map)]
-    (jdbc/with-db-connection *db*
+  (binding [*db-spec* (clean-db-map)]
+    (jdbc/with-db-connection *db-spec*
       (with-redefs [sutils/db-metadata (delay (sutils/db-metadata-fn))]
         (f)))))
 
 (defn with-test-db
   "A fixture to start and migrate a test db before running tests."
   [f]
-  (binding [*db* (clean-db-map)]
-    (jdbc/with-db-connection *db*
+  (binding [*db-spec* (clean-db-map)]
+    (jdbc/with-db-connection *db-spec*
       (with-redefs [sutils/db-metadata (delay (sutils/db-metadata-fn))]
-        (migrate! *db*)
+        (migrate! *db-spec*)
         (f)))))
 
 (defn without-db-var
   "Binds the java.jdbc dtabase connection to nil. When running a unit
-   test using `with-test-db`, jint/*db* will be bound. If the routes
-   being tested don't explicitly bind the db connection, it will use
-   one bound in with-test-db. This causes a problem at runtime that
-   won't show up in the unit tests. This fixture can be used around
-   route testing code to ensure that the route has it's own db
-   connection."
+  test using `with-test-db`, jdbc/*db* will be bound. If the routes
+  being tested don't explicitly bind the db connection, it will use
+  one bound in with-test-db. This causes a problem at runtime that
+  won't show up in the unit tests. This fixture can be used around
+  route testing code to ensure that the route has it's own db
+  connection."
   [f]
   (binding [jdbc/*db* nil]
     (f)))
@@ -82,14 +82,14 @@
 
 (defn with-http-app
   "A fixture to build an HTTP app and make it available as `*app*` within
-  tests. This will provide the `*db*` and `*mq*` to the app as globals if they
+  tests. This will provide the `*db-spec*` and `*mq*` to the app as globals if they
   are available. Note this means this fixture should be nested _within_
   `with-test-db` or `with-test-mq`."
   ([f]
    (with-http-app {} f))
   ([globals-overrides f]
-   (let [get-shared-globals #(merge {:scf-read-db *db*
-                                     :scf-write-db *db*
+   (let [get-shared-globals #(merge {:scf-read-db *db-spec*
+                                     :scf-write-db *db-spec*
                                      :command-mq *mq*
                                      :url-prefix ""}
                                     globals-overrides)]
@@ -134,10 +134,10 @@
                 "content-type" "application/x-www-form-urlencoded"}
       :content-type "application/x-www-form-urlencoded"
       :globals (merge {:update-server "FOO"
-                       :scf-read-db          *db*
-                       :scf-write-db         *db*
-                       :command-mq           *mq*
-                       :product-name         "puppetdb"}
+                       :scf-read-db *db-spec*
+                       :scf-write-db *db-spec*
+                       :command-mq *mq*
+                       :product-name "puppetdb"}
                       global-overrides)}))
 
 (defn internal-request-post
@@ -151,10 +151,10 @@
                 "content-type" "application/json"}
       :content-type "application/json"
       :globals {:update-server "FOO"
-                :scf-read-db          *db*
-                :scf-write-db         *db*
-                :command-mq           *mq*
-                :product-name         "puppetdb"}
+                :scf-read-db *db-spec*
+                :scf-write-db *db-spec*
+                :command-mq *mq*
+                :product-name "puppetdb"}
       :body (ByteArrayInputStream. (.getBytes body "utf8"))}))
 
 (defmacro defixture

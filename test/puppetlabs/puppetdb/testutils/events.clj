@@ -80,5 +80,5 @@
                             version
                             query
                             query-options
-                            fixt/*db*
+                            fixt/*db-spec*
                             "")))

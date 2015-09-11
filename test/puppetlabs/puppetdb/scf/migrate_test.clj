@@ -3,7 +3,7 @@
             [puppetlabs.puppetdb.scf.migrate :as migrate]
             [puppetlabs.puppetdb.scf.migration-legacy :as legacy]
             [puppetlabs.puppetdb.scf.storage :as store]
-            [puppetlabs.puppetdb.fixtures :refer [with-db-metadata *db*]]
+            [puppetlabs.puppetdb.fixtures :refer [*db-spec* with-db-metadata]]
             [puppetlabs.puppetdb.scf.storage-utils :as sutils
              :refer [db-serialize postgres?]]
             [cheshire.core :as json]
@@ -35,19 +35,19 @@
 
 (deftest migration
   (testing "pending migrations"
-    (testing "should return every migration if the *db* isn't migrated"
-      (jdbc/with-db-connection *db*
+    (testing "should return every migration if the db isn't migrated"
+      (jdbc/with-db-connection *db-spec*
         (clear-db-for-testing!)
         (is (= (pending-migrations) migrations))))
 
-    (testing "should return nothing if the *db* is completely migrated"
-      (jdbc/with-db-connection *db*
+    (testing "should return nothing if the db is completely migrated"
+      (jdbc/with-db-connection *db-spec*
         (clear-db-for-testing!)
-        (migrate! *db*)
+        (migrate! *db-spec*)
         (is (empty? (pending-migrations)))))
 
-    (testing "should return missing migrations if the *db* is partially migrated"
-      (jdbc/with-db-connection *db*
+    (testing "should return missing migrations if the db is partially migrated"
+      (jdbc/with-db-connection *db-spec*
         (clear-db-for-testing!)
         (let [applied '(1 2 4)]
           (doseq [m applied]
@@ -58,15 +58,15 @@
 
   (testing "applying the migrations"
     (let [expected-migrations (apply sorted-set (keys migrations))]
-      (jdbc/with-db-connection *db*
+      (jdbc/with-db-connection *db-spec*
         (clear-db-for-testing!)
         (is (= (applied-migrations) #{}))
         (testing "should migrate the database"
-          (migrate! *db*)
+          (migrate! *db-spec*)
           (is (= (applied-migrations) expected-migrations)))
 
         (testing "should not do anything the second time"
-          (migrate! *db*)
+          (migrate! *db-spec*)
           (is (= (applied-migrations) expected-migrations)))
 
         (testing "should attempt a partial migration if there are migrations missing"
@@ -76,20 +76,20 @@
           (doseq [m (filter (fn [[i migration]] (not= i 27)) (pending-migrations))]
             (apply-migration-for-testing! (first m)))
           (is (= (keys (pending-migrations)) '(27)))
-          (migrate! *db*)
+          (migrate! *db-spec*)
           (is (= (applied-migrations) expected-migrations))))))
 
-  (testing "should throw error if *db* is at a higher schema rev than we support"
-    (jdbc/with-transacted-connection *db*
-      (migrate! *db*)
+  (testing "should throw error if db is at a higher schema rev than we support"
+    (jdbc/with-transacted-connection *db-spec*
+      (migrate! *db-spec*)
       (jdbc/insert! :schema_migrations
                     {:version (inc migrate/desired-schema-version)
                      :time (to-timestamp (now))})
-      (is (thrown? IllegalStateException (migrate! *db*))))))
+      (is (thrown? IllegalStateException (migrate! *db-spec*))))))
 
 (deftest migration-14
   (testing "building parameter cache"
-    (jdbc/with-db-connection *db*
+    (jdbc/with-db-connection *db-spec*
       (clear-db-for-testing!)
       ;; Migrate to prior to the cache table
       (fast-forward-to-migration! 13)
@@ -130,7 +130,7 @@
 
 (deftest migration-25
   (testing "should contain same facts before and after migration"
-    (jdbc/with-db-connection *db*
+    (jdbc/with-db-connection *db-spec*
       (clear-db-for-testing!)
       (fast-forward-to-migration! 24)
       (let [current-time (to-timestamp (now))
@@ -187,11 +187,11 @@
                    :timestamp (to-timestamp current-time) :value_string "false"}])))))))
 
 (deftest migration-28
-  (jdbc/with-db-connection *db*
+  (jdbc/with-db-connection *db-spec*
     (clear-db-for-testing!)
     (fast-forward-to-migration! 27)
-    (letfn [(one-row [*db*]
-              (first (query-to-vec (format "SELECT * FROM %s LIMIT 1" *db*))))
+    (letfn [(one-row [*db-spec*]
+              (first (query-to-vec (format "SELECT * FROM %s LIMIT 1" *db-spec*))))
             (facts-now [c v]
               {:certname c :values v
                :environment nil :timestamp (now) :producer_timestamp nil})
@@ -280,7 +280,7 @@
 
 (deftest migration-29
   (testing "should contain same reports before and after migration"
-    (jdbc/with-db-connection *db*
+    (jdbc/with-db-connection *db-spec*
       (clear-db-for-testing!)
       (fast-forward-to-migration! 28)
 
@@ -344,7 +344,7 @@
 
 (deftest migration-37
   (testing "should contain same reports before and after migration"
-    (jdbc/with-db-connection *db*
+    (jdbc/with-db-connection *db-spec*
       (clear-db-for-testing!)
       (fast-forward-to-migration! 36)
 
@@ -421,7 +421,7 @@
             (is (= [id1 id2] latest-ids))))))))
 
 (deftest migration-29-producer-timestamp-not-null
-  (jdbc/with-db-connection *db*
+  (jdbc/with-db-connection *db-spec*
     (clear-db-for-testing!)
     (fast-forward-to-migration! 28)
 
@@ -453,7 +453,7 @@
         (is (= factsets-response [{:producer_timestamp current-time}]))))))
 
 (deftest migration-in-different-schema
-  (jdbc/with-db-connection *db*
+  (jdbc/with-db-connection *db-spec*
     (clear-db-for-testing!)
     (jdbc/do-commands
      ;; Cleaned up in clear-db-for-testing!
@@ -464,10 +464,10 @@
     (let [tables (sutils/sql-current-connection-table-names)]
       ;; Currently sql-current-connection-table-names only looks in public.
       (is (empty? (sutils/sql-current-connection-table-names)))
-      (migrate! *db*))))
+      (migrate! *db-spec*))))
 
 (deftest test-coalesce-fact-values
-  (jdbc/with-db-connection *db*
+  (jdbc/with-db-connection *db-spec*
     (clear-db-for-testing!)
     (fast-forward-to-migration! 30)
     (jdbc/insert! :fact_values

@@ -2,7 +2,7 @@
   (:require [clojure.java.jdbc :as sql]
             [clj-time.core :refer [now]]
             [clj-time.coerce :refer [to-timestamp]]
-            [puppetlabs.puppetdb.fixtures :refer :all]
+            [puppetlabs.puppetdb.fixtures :refer [*db-spec*]]
             [puppetlabs.puppetdb.jdbc :as jdbc]
             [puppetlabs.puppetdb.scf.storage :refer [add-facts! ensure-environment]]
             [puppetlabs.puppetdb.scf.storage-utils :as sutils :refer [db-serialize to-jdbc-varchar-array]]))
@@ -10,7 +10,7 @@
 (defn store-example-resources
   ([] (store-example-resources true))
   ([environment?]
-     (jdbc/with-transacted-connection *db*
+     (jdbc/with-transacted-connection *db-spec*
        (jdbc/insert!
         :resource_params_cache
         {:resource (sutils/munge-hash-for-storage "01")

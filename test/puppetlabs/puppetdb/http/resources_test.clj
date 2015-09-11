@@ -2,7 +2,8 @@
   (:require [cheshire.core :as json]
             [puppetlabs.puppetdb.scf.storage :as scf-store]
             [puppetlabs.puppetdb.http :as http]
-            [puppetlabs.puppetdb.fixtures :as fixt]
+            [puppetlabs.puppetdb.fixtures
+             :refer [*app* *db-spec* with-test-db with-http-app]]
             [puppetlabs.puppetdb.testutils :as tu]
             [clojure.test :refer :all]
             [puppetlabs.puppetdb.testutils :refer [get-request paged-results
@@ -18,7 +19,7 @@
 
 (def endpoints [[:v4 v4-endpoint]])
 
-(use-fixtures :each fixt/with-test-db fixt/with-http-app)
+(use-fixtures :each with-test-db with-http-app)
 
 (defn is-response-equal
   "Test if the HTTP request is a success, and if the result is equal
@@ -211,7 +212,7 @@ to the result of the form supplied to this method."
                               ["with" true]]]
         (testing (str "should support paging through nodes " label " counts")
           (let [results (paged-results
-                         {:app-fn  fixt/*app*
+                         {:app-fn  *app*
                           :path    endpoint
                           :limit   2
                           :total   (count expected)

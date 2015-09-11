@@ -42,7 +42,7 @@
         (is (= status http/status-ok))
         (is (empty? result))))
 
-    (with-transacted-connection fixt/*db*
+    (with-transacted-connection fixt/*db-spec*
       (scf-store/add-certname! "foo1")
       (scf-store/add-certname! "foo2")
       (scf-store/add-certname! "foo3")
@@ -139,7 +139,7 @@
         (is (= status http/status-ok))
         (is (empty? result))))
 
-    (with-transacted-connection fixt/*db*
+    (with-transacted-connection fixt/*db-spec*
       (scf-store/add-certname! "foo1")
       (scf-store/add-certname! "foo2")
       (scf-store/add-certname! "foo3")

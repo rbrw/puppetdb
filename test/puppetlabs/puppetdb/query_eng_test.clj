@@ -121,7 +121,7 @@
                 "memorysize" "16.00 GB"}
         initial-idx @entity-fn-idx]
 
-    (with-transacted-connection fixt/*db*
+    (with-transacted-connection fixt/*db-spec*
       (scf-store/add-certname! "foo1")
       (scf-store/add-certname! "foo2")
       (scf-store/add-certname! "foo3")

@@ -6,7 +6,7 @@
             [clj-time.core :refer [now]]
             [clj-time.coerce :refer [to-string]]
             [schema.core :as s]
-            [puppetlabs.puppetdb.fixtures :refer [*db*]]
+            [puppetlabs.puppetdb.fixtures :refer [*db-spec*]]
             [puppetlabs.puppetdb.utils :as utils]
             [puppetlabs.puppetdb.command.constants :refer [command-names]]
             [puppetlabs.puppetdb.catalogs :refer [catalog-version]]))
@@ -110,7 +110,7 @@
     :annotations {:id (uuid)
                   :received (now)}
     :version     catalog-version}
-   {:db          *db*}))
+   {:db *db-spec*}))
 
 (defn munge-catalog
   "Munges a catalog or list of catalogs for comparison.

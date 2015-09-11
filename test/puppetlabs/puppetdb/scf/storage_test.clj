@@ -25,7 +25,7 @@
             [clj-time.core :refer [ago from-now now days]]
             [clj-time.coerce :refer [to-timestamp to-string]]
             [puppetlabs.puppetdb.jdbc :as jdbc :refer [query-to-vec]]
-            [puppetlabs.puppetdb.fixtures :refer :all]))
+            [puppetlabs.puppetdb.fixtures :refer [*db-spec* with-test-db]]))
 
 (use-fixtures :each with-test-db)
 
@@ -35,7 +35,7 @@
 (defn reset-db!
   []
   (tu/clear-db-for-testing!)
-  (migrate/migrate! *db*))
+  (migrate/migrate! *db-spec*))
 
 (defn-validated factset-map :- {s/Str s/Str}
   "Return all facts and their values for a given certname as a map"
@@ -691,7 +691,7 @@
            [{:c 3}])))
 
   (testing "when GC'ed, should leave no dangling params"
-    (garbage-collect! *db*)
+    (garbage-collect! *db-spec*)
 
     ;; And now they are gone
     (is (= (query-to-vec ["SELECT * FROM resource_params"])
@@ -736,7 +736,7 @@
            [{:c 3}])))
 
   (testing "when GC should leave no dangling environments"
-    (garbage-collect! *db*)
+    (garbage-collect! *db-spec*)
 
     (is (= (query-to-vec ["SELECT * FROM environments"])
            []))))
@@ -754,7 +754,7 @@
     (delete-reports-older-than! (-> 2 days ago))
 
     (is (= [{:c 1}] (query-to-vec ["SELECT COUNT(*) as c FROM report_statuses"])))
-    (garbage-collect! *db*)
+    (garbage-collect! *db-spec*)
     (is (= [{:c 0}] (query-to-vec ["SELECT COUNT(*) as c FROM report_statuses"])))))
 
 (deftest catalog-bad-input

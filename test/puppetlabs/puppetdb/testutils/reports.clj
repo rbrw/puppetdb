@@ -63,7 +63,7 @@
                             version
                             ["=" "hash" hash]
                             {}
-                            fixt/*db*
+                            fixt/*db-spec*
                             "")))
 
 (defn store-example-report!
@@ -119,7 +119,7 @@
                                 version
                                 query
                                 paging-options
-                                fixt/*db*
+                                fixt/*db-spec*
                                 "")
        (map #(dissoc % :receive_time))))
 

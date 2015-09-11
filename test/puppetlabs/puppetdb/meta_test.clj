@@ -84,7 +84,7 @@
       (let [response (-> (get-request (str endpoint "/version/latest"))
                          (with-meta-app
                            {:update-server "http://known.invalid.domain"}
-                           {:scf-read-db fixt/*db*}))
+                           {:scf-read-db fixt/*db-spec*}))
             log-levels-emitted (set (map second @logz))]
         (is (nil? (log-levels-emitted :info)))))))
 

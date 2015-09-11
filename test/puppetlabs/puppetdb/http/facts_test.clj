@@ -10,7 +10,7 @@
             [puppetlabs.puppetdb.cli.services :as cli-svc]
             [puppetlabs.puppetdb.scf.storage-utils :as sutils]
             [puppetlabs.puppetdb.examples :refer :all]
-            [puppetlabs.puppetdb.fixtures :refer :all]
+            [puppetlabs.puppetdb.fixtures :as fixt]
             [puppetlabs.puppetdb.http :as http]
             [puppetlabs.puppetdb.http.server :as server]
             [puppetlabs.puppetdb.jdbc :as jdbc]
@@ -38,7 +38,7 @@
 
 (def fact-contents-endpoints [[:v4 "/v4/fact-contents"]])
 
-(use-fixtures :each with-test-db with-http-app)
+(use-fixtures :each fixt/with-test-db fixt/with-http-app)
 
 (def c-t http/json-response-content-type)
 (def reference-time "2014-10-28T20:26:21.727Z")
@@ -46,7 +46,7 @@
 (defn is-query-result
   [endpoint query expected-results]
   (let [request (get-request endpoint (json/generate-string query))
-        {:keys [status body]} (*app* request)
+        {:keys [status body]} (fixt/*app* request)
         actual-result (parse-result body)]
     (is (= (count actual-result) (count expected-results)))
     (is (= (set actual-result) expected-results))
@@ -448,7 +448,7 @@
    (mid/wrap-with-puppetdb-middleware
     (server/build-app #(hash-map :scf-read-db read-db
                                  :scf-write-db write-db
-                                 :command-mq *mq*
+                                 :command-mq fixt/*mq*
                                  :product-name "puppetdb"))
     nil)))
 
@@ -485,7 +485,7 @@
                 "kernel" "Linux"
                 "operatingsystem" "RedHat"
                 "uptime_seconds" 6000}]
-    (jdbc/with-transacted-connection *db*
+    (jdbc/with-transacted-connection fixt/*db-spec*
       (scf-store/add-certname! "foo1")
       (scf-store/add-certname! "foo2")
       (scf-store/add-certname! "foo3")
@@ -522,7 +522,7 @@
         (doseq [[query result] (versioned-well-formed-tests version)]
           (testing (format "Query %s" query)
             (let [request (get-request endpoint (json/generate-string query))
-                  {:keys [status body headers]} (*app* request)]
+                  {:keys [status body headers]} (fixt/*app* request)]
               (is (= status http/status-ok))
               (is (= (headers "Content-Type") c-t))
               (is (= (set result)
@@ -530,13 +530,13 @@
 
       (testing "malformed, yo"
         (let [request (get-request endpoint (json/generate-string []))
-              {:keys [status body]} (*app* request)]
+              {:keys [status body]} (fixt/*app* request)]
           (is (= status http/status-bad-request))
           (is (= body "[] is not well-formed: queries must contain at least one operator"))))
 
       (testing "'not' with too many arguments"
         (let [request (get-request endpoint (json/generate-string ["not" ["=" "name" "ipaddress"] ["=" "name" "operatingsystem"]]))
-              {:keys [status body]} (*app* request)]
+              {:keys [status body]} (fixt/*app* request)]
           (is (= status http/status-bad-request))
           (is (= body "'not' takes exactly one argument, but 2 were supplied")))))))
 
@@ -578,7 +578,7 @@
     (doseq [[query msg] (get versioned-invalid-subqueries endpoint)]
       (testing (str "query: " query " should fail with msg: " msg)
         (let [request (get-request endpoint (json/generate-string query))
-              {:keys [status body] :as result} (*app* request)]
+              {:keys [status body] :as result} (fixt/*app* request)]
           (is (= body msg))
           (is (= status http/status-bad-request)))))))
 
@@ -592,11 +592,11 @@
                    (assoc :read-database read-db-config)
                    (assoc :database write-db-config))
         read-db (-> read-db-config
-                    defaulted-read-db-config
-                    (init-db true))
+                    fixt/defaulted-read-db-config
+                    (fixt/init-db true))
         write-db (-> write-db-config
-                     defaulted-write-db-config
-                     (init-db false))]
+                     fixt/defaulted-write-db-config
+                     (fixt/init-db false))]
 
     (with-shutdown-after [read-db write-db]
         (svc-utils/call-with-puppetdb-instance
@@ -653,7 +653,7 @@
 (defn test-paged-results
   [endpoint query limit total include_total]
   (paged-results
-   {:app-fn  *app*
+   {:app-fn  fixt/*app*
     :path    endpoint
     :query   query
     :limit   limit
@@ -675,7 +675,7 @@
                 "kernel" "Linux"
                 "operatingsystem" "RedHat"
                 "uptime_seconds" "6000"}]
-    (jdbc/with-transacted-connection *db*
+    (jdbc/with-transacted-connection fixt/*db-spec*
       (scf-store/add-certname! "foo1")
       (scf-store/add-certname! "foo2")
       (scf-store/add-facts! {:certname "foo1"
@@ -712,7 +712,7 @@
               include_total true
               offset 0}}  paging-options
               {:keys [headers body]} (paged-results* (assoc paging-options
-                                                       :app-fn *app*
+                                                       :app-fn fixt/*app*
                                                        :query query
                                                        :path endpoint
                                                        :offset offset
@@ -962,7 +962,7 @@
                   "kernel" "Linux"
                   "operatingsystem" "RedHat"
                   "uptime_seconds" "6000"}]
-      (jdbc/with-transacted-connection *db*
+      (jdbc/with-transacted-connection fixt/*db-spec*
         (scf-store/add-certname! "foo1")
         (scf-store/add-certname! "foo2")
         (scf-store/add-certname! "foo3")
@@ -992,7 +992,8 @@
                       [not [= environment DEV]]
                       ["~" environment PR.*]
                       [not ["~" environment DE.*]]]]
-        (let [{:keys [status headers body]} (*app* (get-request endpoint query))
+        (let [{:keys [status headers body]} (fixt/*app* (get-request endpoint
+                                                                     query))
               results (json/parse-string (slurp body) true)]
           (is (= status http/status-ok))
           (is (= (headers "Content-Type") c-t))
@@ -1036,7 +1037,7 @@
                 "domain" "testing.com"
                 "hostname" "foo4"
                 "uptime_seconds" "6000"}]
-    (jdbc/with-transacted-connection *db*
+    (jdbc/with-transacted-connection fixt/*db-spec*
       (scf-store/add-certname! "foo1")
       (scf-store/add-certname! "foo2")
       (scf-store/add-certname! "foo3")
@@ -1534,7 +1535,7 @@
                 "domain" "testing.com"
                 "hostname" "foo4"
                 "uptime_seconds" 6000}]
-    (jdbc/with-transacted-connection *db*
+    (jdbc/with-transacted-connection fixt/*db-spec*
       (scf-store/add-certname! "foo1")
       (scf-store/add-certname! "foo2")
       (scf-store/add-certname! "foo3")

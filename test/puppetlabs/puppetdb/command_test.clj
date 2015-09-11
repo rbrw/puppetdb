@@ -14,7 +14,7 @@
             [puppetlabs.puppetdb.command :refer :all]
             [puppetlabs.puppetdb.reports :as reports]
             [puppetlabs.puppetdb.testutils :refer :all]
-            [puppetlabs.puppetdb.fixtures :refer :all]
+            [puppetlabs.puppetdb.fixtures :refer [*db-spec* with-test-db]]
             [puppetlabs.puppetdb.jdbc :refer [query-to-vec] :as jdbc]
             [puppetlabs.puppetdb.examples :refer :all]
             [puppetlabs.puppetdb.testutils.reports :refer [munge-example-report-for-storage]]
@@ -108,14 +108,15 @@
    `body` is executed with `publish-var` bound to the number of times the message
    was processed and `discard-var` bound to the directory that contains failed messages."
   [command publish-var discard-var & body]
-  `(test-msg-handler* ~command ~publish-var ~discard-var {:db *db*} ~@body))
+  `(test-msg-handler* ~command ~publish-var ~discard-var {:db *db-spec*}
+                      ~@body))
 
 (defmacro test-msg-handler-with-opts
   "Similar to test-msg-handler, but allows the passing of additional config
    options to the message handler via `opts-map`."
   [command publish-var discard-var opts-map & body]
-  `(test-msg-handler* ~command ~publish-var ~discard-var (merge {:db *db*}
-                                                                ~opts-map)
+  `(test-msg-handler* ~command ~publish-var ~discard-var
+                      (merge {:db *db-spec*} ~opts-map)
                       ~@body))
 
 (deftest command-processor-integration
@@ -1018,7 +1019,7 @@
         (is (= 1 (count
                   (query-to-vec
                    "select id from fact_values where value_string = '1'"))))
-        (scf-store/garbage-collect! *db*)
+        (scf-store/garbage-collect! *db-spec*)
         (is (zero?
              (count
               (query-to-vec
