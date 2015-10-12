@@ -41,6 +41,18 @@
     :user (env :puppetdb2-dbuser "puppetdb")
     :password (env :puppetdb2-dbpassword "puppetdb")}])
 
+(def available-postgres-templates
+  [{:classname "org.postgresql.Driver"
+    :subprotocol "postgresql"
+    :subname (env :puppetdb-template-dbsubname "//127.0.0.1:5432/pdb_test_template")
+    :user (env :puppetdb-dbuser "puppetdb")
+    :password (env :puppetdb-dbpassword "puppetdb")}
+   {:classname "org.postgresql.Driver"
+    :subprotocol "postgresql"
+    :subname (env :puppetdb2-template-dbsubname "//127.0.0.1:5432/pdb_test_template2")
+    :user (env :puppetdb2-dbuser "puppetdb")
+    :password (env :puppetdb2-dbpassword "puppetdb")}])
+
 (def hsqldb-map (create-hsqldb-map))
 
 (def testing-db-type (env :puppetdb-dbtype "postgres"))

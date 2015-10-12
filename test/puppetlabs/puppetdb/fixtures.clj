@@ -12,7 +12,10 @@
             [clojure.tools.macro :as tmacro]
             [clojure.test :refer [join-fixtures use-fixtures]]
             [puppetlabs.puppetdb.testutils
-             :refer [clean-db-map with-test-broker without-jmx]]
+             :refer [available-postgres-configs
+                     available-postgres-templates
+                     clean-db-map with-test-broker without-jmx]]
+            [puppetlabs.puppetdb.testutils.db :refer [create-pdb-db-templates]]
             [puppetlabs.trapperkeeper.logging :refer [reset-logging]]
             [puppetlabs.puppetdb.scf.migrate :refer [migrate!]]
             [puppetlabs.puppetdb.middleware :as mid]))
@@ -21,6 +24,9 @@
 (def ^:dynamic *mq* nil)
 (def ^:dynamic *app* nil)
 (def ^:dynamic *command-app* nil)
+
+(defn- full-sql-exception-msg [ex]
+  (apply str (take-while identity (iterate #(.getNextException %) ex))))
 
 (defn init-db [db read-only?]
   (jdbc/with-db-connection db (migrate! db))
@@ -37,11 +43,40 @@
 (defn with-test-db
   "A fixture to start and migrate a test db before running tests."
   [f]
-  (binding [*db* (clean-db-map)]
+  (binding [*db* (clean-db-map)] 
     (jdbc/with-db-connection *db*
       (with-redefs [sutils/db-metadata (delay (sutils/db-metadata-fn))]
         (migrate! *db*)
+        (f))))
+  ;; (jdbc/with-db-connection (first available-postgres-templates)
+  ;;   (let [conn (doto (:connection (jdbc/db)) (.setAutoCommit true))]
+  ;;     (-> conn .createStatement (.execute "drop database if exists puppetdb"))
+  ;;     (-> conn .createStatement (.execute "create database puppetdb template pdb_test_template"))))
+  ;; (binding [*db* (first available-postgres-configs)] 
+  ;;   (jdbc/with-db-connection *db*
+  ;;     (with-redefs [sutils/db-metadata (delay (sutils/db-metadata-fn))]
+  ;;       (f))))
+  )
+
+(defn call-with-test-db
+  "A fixture to start and migrate a test db before running tests."
+  [f]
+  (jdbc/with-db-connection (first available-postgres-templates)
+    (let [conn (doto (:connection (jdbc/db)) (.setAutoCommit true))]
+      (-> conn .createStatement (.execute "drop database if exists puppetdb"))
+      (-> conn .createStatement (.execute "create database puppetdb template pdb_test_template"))))
+  (binding [*db* (first available-postgres-configs)]
+    (jdbc/with-db-connection *db*
+      (with-redefs [sutils/db-metadata (delay (sutils/db-metadata-fn))]
         (f)))))
+
+(defmacro with-test-db' [& body]
+  `(call-with-test-db (fn [] ~@body)))
+
+(defn with-pdb-db-templates
+  [f]
+  (create-pdb-db-templates)
+  (f))
 
 (defn without-db-var
   "Binds the java.jdbc dtabase connection to nil. When running a unit

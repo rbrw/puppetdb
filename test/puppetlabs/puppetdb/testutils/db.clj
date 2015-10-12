@@ -1,7 +1,10 @@
 (ns puppetlabs.puppetdb.testutils.db
   (:require [clojure.java.jdbc :as sql]
             [puppetlabs.puppetdb.jdbc :as jdbc]
-            [puppetlabs.puppetdb.testutils :refer [clear-db-for-testing! test-db]]))
+            [puppetlabs.puppetdb.scf.migrate :refer [migrate!]]
+            [puppetlabs.puppetdb.testutils
+             :refer [available-postgres-templates clear-db-for-testing!
+                     test-db]]))
 
 (def ^:dynamic *db-spec* nil)
 
@@ -39,3 +42,14 @@
                                  [:value "VARCHAR(256)" "NOT NULL"]))
           (insert-map antonym-data))
         (function)))))
+
+(defn create-pdb-db-templates []
+  (doseq [cfg available-postgres-templates]
+    (clojure.pprint/pprint cfg)
+    (jdbc/with-db-connection cfg
+      (clear-db-for-testing!)
+      (migrate! cfg)
+      ;; (sql/do-commands
+      ;;  "update pg_database set datallowcon = false
+      ;;     where datname = pdb_test_template")
+      )))
