@@ -47,16 +47,7 @@
     (jdbc/with-db-connection *db*
       (with-redefs [sutils/db-metadata (delay (sutils/db-metadata-fn))]
         (migrate! *db*)
-        (f))))
-  ;; (jdbc/with-db-connection (first available-postgres-templates)
-  ;;   (let [conn (doto (:connection (jdbc/db)) (.setAutoCommit true))]
-  ;;     (-> conn .createStatement (.execute "drop database if exists puppetdb"))
-  ;;     (-> conn .createStatement (.execute "create database puppetdb template pdb_test_template"))))
-  ;; (binding [*db* (first available-postgres-configs)] 
-  ;;   (jdbc/with-db-connection *db*
-  ;;     (with-redefs [sutils/db-metadata (delay (sutils/db-metadata-fn))]
-  ;;       (f))))
-  )
+        (f)))))
 
 (defn call-with-test-db
   "A fixture to start and migrate a test db before running tests."

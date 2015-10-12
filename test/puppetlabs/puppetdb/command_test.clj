@@ -15,6 +15,7 @@
             [puppetlabs.puppetdb.config :as conf]
             [puppetlabs.puppetdb.reports :as reports]
             [puppetlabs.puppetdb.testutils :refer :all]
+            [puppetlabs.puppetdb.testutils.db :refer [create-pdb-db-templates]]
             [puppetlabs.puppetdb.fixtures
              :refer [*db* with-pdb-db-templates with-test-db']]
             [puppetlabs.puppetdb.jdbc :refer [query-to-vec] :as jdbc]
@@ -35,6 +36,8 @@
             [puppetlabs.kitchensink.core :as ks])
   (:import [org.joda.time DateTime DateTimeZone]))
 
+
+(create-pdb-db-templates)
 
 ;;(use-fixtures :once with-pdb-db-templates)
 ;;(use-fixtures :each with-test-db)
