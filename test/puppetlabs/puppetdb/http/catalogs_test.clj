@@ -8,12 +8,11 @@
             [puppetlabs.puppetdb.http :as http]
             [puppetlabs.puppetdb.scf.storage-utils :as sutils]
             [puppetlabs.puppetdb.testutils :refer [get-request deftestseq strip-hash]]
-            [puppetlabs.puppetdb.testutils.http :refer [query-response vector-param]]
+            [puppetlabs.puppetdb.testutils.http
+             :refer [deftest-http-app query-response vector-param]]
             [puppetlabs.puppetdb.testutils.catalogs :as testcat]))
 
 (def endpoints [[:v4 "/v4/catalogs"]])
-
-(use-fixtures :each fixt/with-test-db fixt/with-http-app)
 
 (def c-t "application/json")
 
@@ -73,7 +72,7 @@
 
 ;; TESTS
 
-(deftestseq catalog-queries
+(deftest-http-app catalog-queries
   [[version endpoint] endpoints
    method [:get :post]]
   (testcat/replace-catalog (json/generate-string catalog1))
@@ -144,7 +143,7 @@
 (def no-parent-endpoints [[:v4 "/v4/catalogs/foo/edges"]
                           [:v4 "/v4/catalogs/foo/resources"]])
 
-(deftestseq unknown-parent-handling
+(deftest-http-app unknown-parent-handling
   [[version endpoint] no-parent-endpoints
    method [:get :post]]
 

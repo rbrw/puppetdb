@@ -6,7 +6,8 @@
             [puppetlabs.kitchensink.core :refer [keyset]]
             [puppetlabs.puppetdb.testutils :refer [paged-results
                                                    deftestseq]]
-            [puppetlabs.puppetdb.testutils.http :refer [ordered-query-result
+            [puppetlabs.puppetdb.testutils.http :refer [deftest-http-app
+                                                        ordered-query-result
                                                         query-result
                                                         vector-param
                                                         query-response]]
@@ -14,8 +15,6 @@
             [flatland.ordered.map :as omap]))
 
 (def endpoints [[:v4 "/v4/nodes"]])
-
-(use-fixtures :each fixt/with-test-db fixt/with-http-app)
 
 ;; HELPERS
 
@@ -55,7 +54,7 @@
 
 ;; TESTS
 
-(deftestseq node-queries
+(deftest-http-app node-queries
   [[version endpoint] endpoints
    method [:get :post]]
 
@@ -123,7 +122,7 @@
       (is-query-result' ["~" ["fact" "ipaddress"] "192.168.1.11\\d"] [db puppet])
       (is-query-result' ["~" ["fact" "hostname"] "web\\d"] [web1 web2]))))
 
-(deftestseq test-string-coercion-fail
+(deftest-http-app test-string-coercion-fail
   [[version endpoint] endpoints
    method [:get :post]]
   (store-example-nodes)
@@ -134,7 +133,7 @@
 (defn v4-node-field [version]
   "certname")
 
-(deftestseq basic-node-subqueries
+(deftest-http-app basic-node-subqueries
   [[version endpoint] endpoints
    method [:get :post]]
   (let [{:keys [web1 web2 db puppet]} (store-example-nodes)]
@@ -165,7 +164,7 @@
       (testing (str "query: " query " is supported")
         (is-query-result method endpoint query expected)))))
 
-(deftestseq node-subqueries
+(deftest-http-app node-subqueries
   [[version endpoint] endpoints
    method [:get :post]]
 
@@ -201,7 +200,7 @@
           (is (= status http/status-bad-request))
           (is (re-find msg body)))))))
 
-(deftestseq paging-results
+(deftest-http-app paging-results
   [[version endpoint] endpoints
    method [:get :post]]
 
@@ -292,7 +291,7 @@
           (is (= (set (vals expected))
                  (set (map :certname results)))))))))
 
-(deftestseq node-timestamp-queries
+(deftest-http-app node-timestamp-queries
   [[version endpoint] endpoints
    method [:get :post]]
 
@@ -325,7 +324,7 @@
      ["extract" ["certname" "nothing" "nothing2"] ["~" "certname" ".*"]]
      #"Can't extract unknown 'nodes' fields: 'nothing', 'nothing2'.*Acceptable fields are.*"))
 
-(deftestseq invalid-projections
+(deftest-http-app invalid-projections
   [[version endpoint] endpoints
    method [:get :post]
    [query msg] invalid-projection-queries]
@@ -343,7 +342,7 @@
                   ["~" "certname" "[]"]
                   #".*invalid regular expression: brackets.*not balanced")))
 
-(deftestseq ^{:hsqldb false} pg-invalid-regexps
+(deftest-http-app ^{:hsqldb false} pg-invalid-regexps
   [[version endpoint] endpoints
    method [:get :post]
    [query msg] (get pg-versioned-invalid-regexps endpoint)]
@@ -355,7 +354,7 @@
 (def no-parent-endpoints [[:v4 "/v4/nodes/foo/facts"]
                           [:v4 "/v4/nodes/foo/resources"]])
 
-(deftestseq unknown-parent-handling
+(deftest-http-app unknown-parent-handling
   [[version endpoint] no-parent-endpoints
    method [:get :post]]
   (let [{:keys [status body] :as result} (query-response method endpoint)]

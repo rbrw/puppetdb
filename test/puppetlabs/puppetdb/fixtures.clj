@@ -64,6 +64,9 @@
 (defmacro with-test-db' [& body]
   `(call-with-test-db (fn [] ~@body)))
 
+;; (defmacro with-test-db' [& body]
+;;   `(with-test-db (fn [] ~@body)))
+
 (defn with-pdb-db-templates
   [f]
   (create-pdb-db-templates)
