@@ -69,6 +69,9 @@
           (migrate! *db*)
           (f))))))
 
+(defmacro with-test-db [& body]
+  `(call-with-test-db (fn [] ~@body)))
+
 (defn without-db-var
   "Binds the java.jdbc dtabase connection to nil. When running a unit
    test using `call-with-test-db`, jint/*db* will be bound. If the routes
@@ -106,13 +109,11 @@
                             nil)]
      (f))))
 
-(defn with-http-app
-  "A fixture to build an HTTP app and make it available as `*app*` within
-  tests. This will provide the `*db*` and `*mq*` to the app as globals if they
-  are available. Note this means this fixture should be nested _within_
-  `call-with-test-db` or `with-test-mq`."
+(defn call-with-http-app
+  "Builds an HTTP app and make it available as *app* during the
+  execution of (f)."
   ([f]
-   (with-http-app {} f))
+   (call-with-http-app {} f))
   ([globals-overrides f]
    (let [get-shared-globals #(merge {:scf-read-db *db*
                                      :scf-write-db *db*
@@ -122,6 +123,12 @@
                       (server/build-app get-shared-globals)
                       nil)]
        (f)))))
+
+(defmacro with-http-app
+  ([maybe-globals-overrides & body]
+   (if (map? maybe-globals-overrides)
+     `(call-with-http-app maybe-globals-overrides (fn [] ~@body))
+     `(call-with-http-app (fn [] ~@body)))))
 
 (defn defaulted-write-db-config
   "Defaults and converts `db-config` from the write database INI

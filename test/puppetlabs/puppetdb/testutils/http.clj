@@ -53,3 +53,18 @@
   ([method endpoint query params & optional-handlers]
    (apply #(ordered-query-result method endpoint query params set %)
           (or optional-handlers [identity]))))
+
+(defmacro deftest-http-app [name bindings & body]
+  (let [case-versions (remove keyword? (take-nth 2 bindings))]
+    `(deftest ~name
+       (tu/dotestseq ~bindings
+         (fixt/with-test-db
+           (fixt/with-http-app (fn [] ~@body)))))))
+
+(defmacro deftest-command-app [name bindings & body]
+  (let [case-versions (remove keyword? (take-nth 2 bindings))]
+    `(deftest ~name
+       (tu/dotestseq ~bindings
+         (fixt/with-test-db
+           (fixt/with-test-mq
+             (fn [] (fixt/with-command-app (fn [] ~@body)))))))))
