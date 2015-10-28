@@ -90,9 +90,25 @@ This will let you develop on PuppetDB and see your changes by simply editing the
 
 A sample config file is provided in the root of the source repo:  `config.sample.ini`. You can also provide a conf.d-style directory instead of a flat config file.
 
-Other useful commands for developers:
+In order to run the local test suite, you will first need to have a
+PostgreSQL instance configured as described in "Using PostgreSQL", and
+once that's finished, you should have a database user named puppetdb.
 
-* `lein test` to run the test suite
+To run the local tests, you will need one additional, more privileged
+user (that can create and drop databases), which you can create using
+this command:
+
+    $ createuser -dRSP pdb_test_admin
+
+You will also need to set the following environment variables if the
+default values aren't appropriate:
+
+  * PDB\_TEST\_DB\_HOST (defaults to localhost)
+  * PDB\_TEST\_DB\_PORT (defaults to 5432)
+  * PDB\_TEST\_DB\_USER (defaults to puppetdb)
+  * PDB\_TEST\_DB\_PASSWORD (defaults to puppetdb)
+  * PDB\_TEST\_DB\_ADMIN (defaults to pdb\_test\_admin)
+  * PDB\_TEST\_DB\_ADMIN\_PASSWORD (defaults to pdb\_test\_admin)
 
 Step 3, Option A: Run the SSL Configuration Script
 -----
