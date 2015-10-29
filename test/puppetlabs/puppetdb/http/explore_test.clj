@@ -5,9 +5,9 @@
             [puppetlabs.puppetdb.http :as http]
             [clojure.test :refer :all]
             [clj-time.core :refer [now]]
-            [puppetlabs.puppetdb.fixtures
-             :refer [*app* with-test-db with-http-app]]
             [puppetlabs.puppetdb.testutils :refer [assert-success! get-request]]
+            [puppetlabs.puppetdb.testutils.db :refer [with-test-db]]
+            [puppetlabs.puppetdb.testutils.http :refer [*app* with-http-app]]
             [puppetlabs.puppetdb.examples :refer :all]))
 
 (def c-t http/json-response-content-type)

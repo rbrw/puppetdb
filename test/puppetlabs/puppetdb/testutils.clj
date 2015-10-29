@@ -1,13 +1,22 @@
 (ns puppetlabs.puppetdb.testutils
-  (:import (org.apache.activemq.broker BrokerService))
-  (:require [puppetlabs.puppetdb.mq :as mq]
+  (:import [java.io ByteArrayInputStream]
+           [org.apache.activemq.broker BrokerService])
+  (:require [puppetlabs.puppetdb.config :refer [default-mq-endpoint]]
+            [puppetlabs.puppetdb.command :as dispatch]
+            [puppetlabs.puppetdb.middleware
+             :refer [wrap-with-puppetdb-middleware]]
+            [puppetlabs.puppetdb.mq :as mq]
             [puppetlabs.puppetdb.http :as http]
+            [puppetlabs.puppetdb.http.command :refer [command-app]]
             [puppetlabs.puppetdb.query.paging :as paging]
+            [puppetlabs.puppetdb.testutils.db :refer [*db*]]
             [clojure.string :as string]
             [clojure.java.jdbc :as sql]
             [cheshire.core :as json]
             [me.raynes.fs :as fs]
-            [puppetlabs.trapperkeeper.testutils.logging :refer [with-log-output]]
+            [puppetlabs.trapperkeeper.logging :refer [reset-logging]]
+            [puppetlabs.trapperkeeper.testutils.logging
+             :refer [with-log-output with-test-logging]]
             [slingshot.slingshot :refer [throw+]]
             [ring.mock.request :as mock]
             [puppetlabs.puppetdb.scf.storage-utils :as sutils]
@@ -16,7 +25,8 @@
             [environ.core :refer [env]]
             [clojure.test :refer :all]
             [clojure.set :refer [difference]]
-            [puppetlabs.puppetdb.test-protocols :as test-protos]))
+            [puppetlabs.puppetdb.test-protocols :as test-protos]
+))
 
 (def c-t "application/json")
 
@@ -25,32 +35,6 @@
     `(doseq ~bindings
        (testing (str "Testing case " '~case-versions)
          ~@body))))
-
-(defn drop-table!
-  "Drops a table from the database.  Expects to be called from within a db binding.
-  Exercise extreme caution when calling this function!"
-  [table-name]
-  (jdbc/do-commands (format "DROP TABLE IF EXISTS %s CASCADE" table-name)))
-
-(defn drop-sequence!
-  "Drops a sequence from the database.  Expects to be called from within a db binding.
-  Exercise extreme caution when calling this function!"
-  [sequence-name]
-  (jdbc/do-commands (format "DROP SEQUENCE IF EXISTS %s" sequence-name)))
-
-(defn clear-db-for-testing!
-  "Completely clears the database specified by config (or the current
-  database), dropping all puppetdb tables and other objects that exist
-  within it. Expects to be called from within a db binding.  You
-  Exercise extreme caution when calling this function!"
-  ([config]
-   (jdbc/with-db-connection config (clear-db-for-testing!)))
-  ([]
-   (jdbc/do-commands "DROP SCHEMA IF EXISTS pdbtestschema CASCADE")
-   (doseq [table-name (cons "test" (sutils/sql-current-connection-table-names))]
-     (drop-table! table-name))
-   (doseq [sequence-name (cons "test" (sutils/sql-current-connection-sequence-names))]
-     (drop-sequence! sequence-name))))
 
 (defmacro without-jmx
   "Disable ActiveMQ's usage of JMX. If you start two AMQ brokers in
@@ -85,6 +69,17 @@
          (finally
            (mq/stop-broker! broker#)
            (fs/delete-dir dir#))))))
+
+(def ^:dynamic *mq* nil)
+
+(defn call-with-test-mq
+  "Calls f after starting an embedded MQ broker that will be available
+  for the duration of the call via *mq*.  JMX will be disabled."
+  [f]
+  (without-jmx
+   (with-test-broker "test" connection
+     (binding [*mq* {:connection connection}]
+       (f)))))
 
 (defn call-counter
   "Returns a method that just tracks how many times it's called, and
@@ -409,3 +404,65 @@
 
       test-protos/IMockFn
       (called? [_] @was-called))))
+
+(defn internal-request
+  "Create a ring request as it would look after passing through all of the
+   application middlewares, suitable for invoking one of the api functions
+   (where it assumes the middleware have already assoc'd in various attributes)."
+  ([]
+     (internal-request {}))
+  ([params]
+     (internal-request {} params))
+  ([global-overrides params]
+     {:params params
+      :headers {"accept" "application/json"
+                "content-type" "application/x-www-form-urlencoded"}
+      :content-type "application/x-www-form-urlencoded"
+      :globals (merge {:update-server "FOO"
+                       :scf-read-db          *db*
+                       :scf-write-db         *db*
+                       :product-name         "puppetdb"}
+                      global-overrides)}))
+
+(defn internal-request-post
+  "A variant of internal-request designed to submit application/json requests
+  instead."
+  ([body]
+     (internal-request-post body {}))
+  ([body params]
+     {:params params
+      :headers {"accept" "application/json"
+                "content-type" "application/json"}
+      :content-type "application/json"
+      :globals {:update-server "FOO"
+                :scf-read-db          *db*
+                :scf-write-db         *db*
+                :product-name         "puppetdb"}
+      :body (ByteArrayInputStream. (.getBytes body "utf8"))}))
+
+(defn call-with-test-logging-silenced
+  "A fixture to temporarily redirect all logging output to an atom, rather than
+  to the usual ConsoleAppender.  Useful for tests that are intentionally triggering
+  error conditions, to prevent them from cluttering up the test output with log
+  messages."
+  [f]
+  (reset-logging)
+  (with-test-logging
+    (f)))
+
+(def ^:dynamic *command-app* nil)
+
+(defn call-with-command-app
+  "A fixture to build a Command app and make it available as
+  *command-app* within tests. This call should be nested within
+  with-test-mq."
+  ([f]
+   (binding [*command-app* (wrap-with-puppetdb-middleware
+                            (command-app
+                             (fn [] {})
+                             (partial #'dispatch/do-enqueue-raw-command
+                                      (:connection *mq*)
+                                      default-mq-endpoint)
+                             (fn [] nil))
+                            nil)]
+     (f))))
