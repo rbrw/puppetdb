@@ -1,0 +1,31 @@
+#!/usr/bin/env bash
+
+set -ueo pipefail
+
+usage() { echo 'Usage: PGHOST=X PGPORT=y pdb-test-env DIR CMD [ARG...]' 1>&2; }
+
+if test "$#" -lt 1 -o -z "$PGHOST" -o -z "$PGPORT"; then
+    usage
+    exit 1
+fi
+
+pgdir="$1"
+readonly pgdir
+shift 1
+
+cd "$pgdir"
+
+PGPASSFILE="${PGPASSFILE:-$(pwd)/pgpass}"
+export PGPASSFILE
+
+export PDB_TEST_DB_HOST="$PGHOST"
+export PDB_TEST_DB_PORT="$PGPORT"
+export PDB_TEST_DB_USER=pdb_test
+export PDB_TEST_DB_ADMIN=pdb_test_admin
+
+pass="$(cat pass)"
+admin_pass="$(cat pass-admin)"
+export PDB_TEST_DB_USER_PASSWORD="$pass"
+export PDB_TEST_DB_ADMIN_PASSWORD="$admin_pass"
+
+exec "$@"
