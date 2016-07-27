@@ -4,6 +4,7 @@
             [clj-http.client :as client]
             [puppetlabs.http.client.sync :as pl-http]
             [puppetlabs.puppetdb.admin :as admin]
+            [puppetlabs.puppetdb.cheshire :as json]
             [puppetlabs.trapperkeeper.testutils.logging :refer [with-log-output logs-matching]]
             [puppetlabs.puppetdb.cli.services :refer :all]
             [puppetlabs.puppetdb.testutils.db :refer [*db* with-test-db]]
@@ -65,13 +66,19 @@
   (svc-utils/with-single-quiet-pdb-instance
     (let [dispatcher (get-service svc-utils/*server* :PuppetDBCommandDispatcher)
           query-fn (partial query (get-service svc-utils/*server* :PuppetDBServer))]
-      (enqueue-command dispatcher :replace-facts 4
-                       {:certname "foo.local"
-                        :environment "DEV"
-                        :values {:foo "the foo"
-                                 :bar "the bar"
-                                 :baz "the baz"}
-                        :producer_timestamp (to-string (now))})
+      (enqueue-command dispatcher
+                       "replace facts"
+                       4
+                       "foo.local"
+                       (-> {:certname "foo.local"
+                            :environment "DEV"
+                            :values {:foo "the foo"
+                                     :bar "the bar"
+                                     :baz "the baz"}
+                            :producer_timestamp (to-string (now))}
+                           json/generate-string
+                           (.getBytes "UTF-8")
+                           java.io.ByteArrayInputStream.))
 
       @(block-until-results 200 (first (get-factsets "foo.local")))
 
@@ -97,11 +104,17 @@
   (svc-utils/with-puppetdb-instance
     (let [dispatcher (get-service svc-utils/*server* :PuppetDBCommandDispatcher)
           query-fn (partial query (get-service svc-utils/*server* :PuppetDBServer))]
-      (enqueue-command dispatcher :replace-facts 4
-                       {:certname "foo.local"
-                        :environment "DEV"
-                        :values {:a "a" :b "b" :c "c"}
-                        :producer_timestamp (to-string (now))})
+      (enqueue-command dispatcher
+                       "replace facts"
+                       4
+                       "foo.local"
+                       (-> {:certname "foo.local"
+                            :environment "DEV"
+                            :values {:a "a" :b "b" :c "c"}
+                            :producer_timestamp (to-string (now))}
+                           json/generate-string
+                           (.getBytes "UTF-8")
+                           java.io.ByteArrayInputStream.))
 
       @(block-until-results 200 (first (get-factsets "foo.local")))
       (let [exp ["a" "b" "c"]
