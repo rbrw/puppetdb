@@ -33,10 +33,10 @@
                   config/load-config (fn [_] config)
                   ;; this normally calls System/exit on a cli error; we'd rather have the exception.
                   utils/try+-process-cli! (fn [body] (body))]
-      (let [result (apply benchmark/benchmark-main cli-args)]
-        (when (benchmark/chan? result)
+      (let [stop (benchmark/benchmark cli-args)]
+        (when stop
           (<!! (timeout 1000))
-          (close! result)))
+          (stop result)))
       @submitted-records)))
 
 (deftest config-is-required

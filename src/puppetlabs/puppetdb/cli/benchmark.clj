@@ -43,7 +43,7 @@
             [puppetlabs.puppetdb.cheshire :as json]
             [me.raynes.fs :as fs]
             [clojure.java.io :as io]
-            [puppetlabs.puppetdb.utils :as utils]
+            [puppetlabs.puppetdb.utils :as utils :refer [println-err]]
             [puppetlabs.kitchensink.core :as kitchensink]
             [clj-time.core :as time]
             [puppetlabs.puppetdb.client :as client]
@@ -51,14 +51,21 @@
             [puppetlabs.puppetdb.random :refer [random-string random-bool]]
             [puppetlabs.puppetdb.archive :as archive]
             [slingshot.slingshot :refer [try+ throw+]]
-            [clojure.core.async :refer [go go-loop >! <! >!! <!! timeout chan close! dropping-buffer pipeline]]
+            [clojure.core.async
+             :refer [go go-loop >! <! >!! <!! timeout chan close!
+                     dropping-buffer pipeline]]
             [clojure.core.match :as cm]
             [puppetlabs.puppetdb.mq :as mq]
             [taoensso.nippy :as nippy]
-            [puppetlabs.i18n.core :refer [trs]])
-  (:import [org.apache.activemq.broker BrokerService]
-           [javax.jms MessageConsumer MessageProducer Session]
-           [clojure.core.async.impl.protocols Buffer]))
+            [puppetlabs.i18n.core :refer [trs]]
+            [puppetlabs.puppetdb.nio :refer [get-path]]
+            [puppetlabs.stockpile.queue :as stock])
+  (:import [clojure.core.async.impl.protocols Buffer]
+           [java.io ByteArrayInputStream]
+           [java.nio.file.attribute FileAttribute]
+           [java.nio.file Files]
+           [java.util.concurrent.atomic AtomicBoolean]
+           [org.apache.commons.io IOUtils]))
 
 (def cli-description "Development-only benchmarking tool")
 
@@ -69,7 +76,7 @@
   (try
     (json/parse-string (slurp file))
     (catch Exception e
-      (log/error (trs "Error parsing {0}; skipping" file)))))
+      (println-err (trs "Error parsing {0}; skipping" file)))))
 
 (defn load-sample-data
   "Load all .json files contained in `dir`."
@@ -82,8 +89,8 @@
                     (filterv (complement nil?)))]
       (if (seq data)
         data
-        (log/error
-         (trs "Supplied directory {0} contains no usable data!" dir))))))
+        (println-err (trs "Supplied directory {0} contains no usable data!"
+                          dir))))))
 
 (def producers (vec (repeatedly 4 #(random-string 10))))
 
@@ -240,14 +247,12 @@
            :catalog catalog
            :factset factset)))
 
-(defn submit-n-messages
+(defn submit-messages
   "Given a list of host maps, send `num-messages` to each host.  The function
    is recursive to accumulate possible catalog mutations (i.e. changing a previously
    mutated catalog as opposed to different mutations of the same catalog)."
   [hosts num-msgs rand-percentage command-send-ch]
-  (log/info
-   (trs "Sending {0} messages for {1} hosts, will exit upon completion"
-        num-msgs (count hosts)))
+  (println-err (trs "Sending {0} messages for {1} hosts" num-msgs (count hosts)))
   (loop [mutated-hosts hosts
          msgs-to-send num-msgs
          stamp (time/minus (time/now) (time/minutes (* 30 num-msgs)))]
@@ -394,69 +399,28 @@
                    (cons (first s) (first buckets))))
       (seq buckets))))
 
-(defn make-jms-nippy-message
-  "Create a jms message containing the clojure data structure 'payload' encoded
-  into a byte array using nippy."
-  [session payload]
-  (let [msg (.createBytesMessage session)
-        payload-bytes (nippy/freeze payload)]
-    (.writeBytes msg payload-bytes)
-    msg))
-
-(defn unpack-jms-nippy-message
-  "Return the clojure data payload from a message created with
-  'make-jms-nippy-message'."
-  [msg]
-  (let [bytes (byte-array (.getBodyLength msg))]
-    (.readBytes msg bytes)
-    (nippy/thaw bytes)))
-
-(deftype AMQBrokerBuffer [^BrokerService broker
-                          ^Session session
-                          ^MessageProducer producer
-                          ^MessageConsumer consumer
-                          mq-dir
-                          queue-count]
+(deftype StockpileBuffer [stockpile pending-entries]
   Buffer
   (full? [this] false)
   (remove! [this]
-    (swap! queue-count dec)
-    (mq/commit-or-rollback session (unpack-jms-nippy-message (.receive consumer))))
+    (let [entry (first @pending-entries)
+          result (with-open [s (stock/stream stockpile entry)]
+                   (nippy/thaw (IOUtils/toByteArray s)))]
+      (swap! pending-entries pop)
+      result))
   (add!* [this item]
-    (swap! queue-count inc)
-    (mq/commit-or-rollback session (.send producer (make-jms-nippy-message session item))))
+    (let [entry (->> item nippy/freeze (ByteArrayInputStream.)
+                     (stock/store stockpile))]
+      (swap! pending-entries conj entry)))
   (close-buf! [this]
-    (println "Shutting down AMQ...")
-    (reset! queue-count 0)
-    (mq/stop-broker! broker)
-    (fs/delete-dir mq-dir))
+    true)
   clojure.lang.Counted
-  (count [this] @queue-count))
+  (count [this] (count @pending-entries)))
 
-(defn amq-broker-buffer [broker-name endpoint-name]
-  (let [dir (kitchensink/absolute-path broker-name)
-        conn-str (str "vm://" broker-name
-                      "?broker.useJmx=false"
-                      "&broker.enableStatistics=false"
-                      "&jms.useCompression=true"
-                      "&jms.copyMessageOnSend=false")
-        size-megs 20000
-        broker (mq/build-embedded-broker broker-name
-                                         dir
-                                         {:store-usage size-megs
-                                          :temp-usage  size-megs})
-        _ (println "Using amq in" dir)
-        _ (.setPersistent broker false)
-        _ (mq/start-broker! broker)
-        factory (mq/activemq-connection-factory conn-str)
-        connection (doto (.createConnection factory) .start)
-        session (.createSession connection true 0)]
-    (AMQBrokerBuffer. broker
-                      session
-                      (.createProducer session (.createQueue session endpoint-name))
-                      (.createConsumer session (.createQueue session endpoint-name))
-                      dir
-                      (atom 0))))
+(defn message-buffer
+  [storage-dir]
+  (let [stockpile (stock/create storage-dir)]
+    (StockpileBuffer. stockpile (atom clojure.lang.PersistentQueue/EMPTY))))
 
 (defn relay-messages-at-rate
   "Relay messages from in-ch to out-ch at the given rate in
@@ -471,27 +435,134 @@
           (<! message-timeout)
           (recur))))))
 
-(defn benchmark-main
-  [& args]
+(defn random-hosts
+  [n pdb-host catalogs reports facts]
+  (let [random-entity (fn [host entities]
+                        (some-> entities
+                                rand-nth
+                                (assoc "certname" host)))]
+    (for [i (range n)]
+      (let [host (str "host-" i)]
+        {:host host
+         :catalog (when-let [cat (random-entity host catalogs)]
+                    (update cat "resources"
+                            (partial map #(update % "tags"
+                                                  conj
+                                                  pdb-host))))
+         :report (random-entity host reports)
+         :factset (random-entity host facts)}))))
+
+(defn populate-queue
+  "Fills queue with host entries.  Stops if mq is closed."
+  [mq numhosts run-interval pdb-host catalogs reports facts]
+  (println-err (trs "Populating queue in the background"))
+  (doseq [host (random-hosts numhosts pdb-host catalogs reports facts)
+          :while (>!! mq (assoc host :lastrun
+                                (rand-lastrun run-interval)))]
+    (println-err host)
+    true)
+  (println-err (trs "Finished populating queue")))
+
+(defn cycle-commands [numhosts run-interval rand-perc simulation-threads
+                      rate-monitor-ch command-send-ch
+                      pdb-host catalogs reports facts]
+  ;; This has to support two different kinds of exit.
+  (let [preftmp (get-path (or (System/getenv "TMPDIR")
+                              (System/getProperty "java.io.tmpdir")))
+        tmpdir (Files/createTempDirectory preftmp
+                                          "pdb-bench-"
+                                          (into-array FileAttribute []))
+        _ (println-err (trs "Using scratch dir {0}" (pr-str (str tmpdir))))
+        mq (chan (message-buffer (.resolve tmpdir "q")))
+        rate-limited-mq-out (chan)
+        channels [rate-limited-mq-out mq rate-monitor-ch command-send-ch]
+        fill-queue (doto (Thread. #(populate-queue mq numhosts run-interval
+                                                   pdb-host
+                                                   catalogs reports facts))
+                     (.setDaemon true))
+        shutdown-thread (promise)  ;; Because no letrec...
+        stopping? (AtomicBoolean.)
+        stop (fn []
+               (when-not (.getAndSet stopping? true)
+                 ;; Close narrow race between hook install and fill-queue start.
+                 ;; Give up after 3s and shutdown anyway (perhaps more noisily).
+                 (doseq [i (range 30)
+                         :while (= Thread$State/NEW (.getState fill-queue))]
+                   (Thread/sleep 100))
+                 (try
+                   ;; This removal will only succeed when stop is
+                   ;; called directly (not as a hook), which is
+                   ;; currently only during testing.  A normal
+                   ;; benchmark process solely relies on
+                   ;; C-c to shut down, in which case we'll see the
+                   ;; IllegalStateException.
+                   (.removeShutdownHook (Runtime/getRuntime) @shutdown-thread)
+                   (catch IllegalStateException _
+                     nil))
+                 ;; This is a mess because we want to make sure we
+                 ;; always try to close all the channels, and call
+                 ;; delete-dir.
+                 (let [close-error?
+                       (try
+                         (not-every? identity
+                                     (map #(try
+                                             (close! %)
+                                             true
+                                             (catch Exception ex
+                                               (println-err ex)
+                                               ex
+                                               false))
+                                          channels))
+                         (catch Exception ex
+                           (println-err ex)
+                           ex
+                           false))
+                       join-error?
+                       (try
+                         (.join fill-queue 500)
+                         (when (.isAlive fill-queue)
+                           (println-err (trs "Waiting up to 10s for shutdown"))
+                           ;; Do we need to make this configurable for CI mess?
+                           (.join fill-queue 10000))
+                         false
+                         (catch Exception ex
+                           (println-err ex)
+                           true))]
+                   (fs/delete-dir tmpdir)
+                   (and (not close-error?)
+                        (not join-error?)
+                        (not (.isAlive fill-queue))))))]
+
+    (deliver shutdown-thread (Thread. stop))
+    ;; Note: hooks must *always* terminate, or jvm will zombie...
+    (.addShutdownHook (Runtime/getRuntime) @shutdown-thread)
+    (.start fill-queue)
+
+    (let [run-interval-minutes (time/in-minutes run-interval)
+          hosts-per-second (/ numhosts (* run-interval-minutes 60))]
+      (relay-messages-at-rate mq rate-limited-mq-out hosts-per-second)
+      (pipeline simulation-threads
+                mq
+                (map #(update-host % rand-perc (time/now) command-send-ch))
+                rate-limited-mq-out)
+      stop)))
+
+(defn benchmark
+  [args]
+  "Feeds commands to PDB as requested by args.  If --runinterval has
+  been specified, returns a function that can be called to stop
+  processing and clean up.  That function returns true or false to
+  indicate whether the shutdown encountered any problems."
+  ;; Since we're relying on C-c to exit, we can't count on any
+  ;; particular bit of code to run that's not in a shutdown hook, and
+  ;; those hooks fire in an unspecified order, racing with daemon
+  ;; threads.
   (let [{:keys [config rand-perc numhosts nummsgs threads] :as options} (validate-cli! args)
         _ (logutils/configure-logging! (get-in config [:global :logging-config]))
         {:keys [catalogs reports facts]} (load-data-from-options options)
         {pdb-host :host pdb-port :port
          :or {pdb-host "127.0.0.1" pdb-port 8080}} (:jetty config)
         base-url (utils/pdb-cmd-base-url pdb-host pdb-port :v1)
-        ;; Create an agent for each host
-        get-random-entity (fn [host entities]
-                            (some-> entities
-                                    rand-nth
-                                    (assoc "certname" host)))
-        make-host (fn [i]
-                    (let [host (str "host-" i)]
-                      {:host host
-                       :catalog (when-let [catalog (get-random-entity host catalogs)]
-                                  (update catalog "resources" (partial map #(update % "tags" conj pdb-host))))
-                       :report (get-random-entity host reports)
-                       :factset (get-random-entity host facts)}))
-        hosts (map make-host (range numhosts))
         command-send-ch (if nummsgs
                           (chan)
                           (chan (dropping-buffer 10000)))
@@ -507,52 +578,27 @@
     (dotimes [_ threads]
       (start-command-sender base-url command-send-ch rate-monitor-ch))
 
-    (when-not catalogs (log/info (trs "No catalogs specified; skipping catalog submission")))
-    (when-not reports (log/info (trs "No reports specified; skipping report submission")))
-    (when-not facts (log/info (trs "No facts specified; skipping fact submission")))
+    (when-not catalogs
+      (println-err (trs "No catalogs specified; skipping catalog submission")))
+    (when-not reports
+      (println-err (trs "No reports specified; skipping report submission")))
+    (when-not facts
+      (println-err (trs "No facts specified; skipping fact submission")))
 
     (if nummsgs
       (do
-        (submit-n-messages hosts nummsgs rand-perc command-send-ch)
+        (submit-messages (random-hosts numhosts pdb-host catalogs reports facts)
+                           nummsgs rand-perc command-send-ch)
         (dotimes [_ threads]
           (>!! command-send-ch :stop))
         (close! command-send-ch))
+      (let [stop (cycle-commands numhosts run-interval rand-perc simulation-threads
+                                 rate-monitor-ch command-send-ch
+                                 pdb-host catalogs reports facts)]
+        (println-err (trs "Press ctrl-c to stop"))
+        (while true
+          (Thread/sleep 10000))))))
 
-      (let [close-to-stop-ch (chan)
-            mq (chan (amq-broker-buffer "benchmark-mq" "benchmark-endpoint"))]
-
-        ;; be sure to clear the temp queue on exit
-        (.addShutdownHook (Runtime/getRuntime) (Thread. #(close! mq)))
-
-        ;; initial queue population
-        (future
-          (println "Populating the queue in the background")
-          (dotimes [n numhosts]
-            (let [h (-> (make-host n)
-                        (assoc :lastrun (rand-lastrun run-interval)))]
-              (>!! mq h)))
-
-          (println "... finished filling the queue, continuing with the simulation."))
-
-        (let [run-interval-minutes (time/in-minutes run-interval)
-              hosts-per-second (/ numhosts (* run-interval-minutes 60))
-              rate-limited-mq-out (chan)]
-          (relay-messages-at-rate mq rate-limited-mq-out hosts-per-second)
-          (pipeline simulation-threads
-                    mq
-                    (map #(update-host % rand-perc (time/now) command-send-ch))
-                    rate-limited-mq-out)
-          (go
-            (<! close-to-stop-ch)
-            (mapv close! [rate-limited-mq-out mq rate-monitor-ch command-send-ch])))
-        close-to-stop-ch))))
-
-(defn chan? [x]
-  (satisfies? clojure.core.async.impl.protocols/Channel x))
-
-
-(defn -main [& args]
-  (let [x (apply benchmark-main args)]
-    (when (chan? x)
-      (println "Press ctrl-c to stop.")
-      (<!! x))))
+(defn -main
+  [& args]
+  (benchmark args))
