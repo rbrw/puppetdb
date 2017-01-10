@@ -56,10 +56,14 @@
             [puppetlabs.puppetdb.mq :as mq]
             [puppetlabs.puppetdb.amq-migration :as amq]
             [taoensso.nippy :as nippy]
-            [puppetlabs.i18n.core :refer [trs]])
-  (:import [org.apache.activemq.broker BrokerService]
-           [javax.jms MessageConsumer MessageProducer Session]
-           [clojure.core.async.impl.protocols Buffer]))
+            [puppetlabs.i18n.core :refer [trs]]
+            [puppetlabs.puppetdb.nio :refer [get-path]])
+  (:import
+   [clojure.core.async.impl.protocols Buffer]
+   [java.io ByteArrayInputStream]
+   [java.nio.file.attribute FileAttribute]
+   [java.nio.file Files OpenOption]
+   [java.util ArrayDeque]))
 
 (def cli-description "Development-only benchmarking tool")
 
@@ -281,7 +285,11 @@
                ["-C" "--catalogs CATALOGS" "Path to a directory containing sample JSON catalogs (files must end with .json)"]
                ["-R" "--reports REPORTS" "Path to a directory containing sample JSON reports (files must end with .json)"]
                ["-A" "--archive ARCHIVE" "Path to a PuppetDB export tarball. Incompatible with -C, -F or -R"]
-               ["-i" "--runinterval RUNINTERVAL" "What runinterval (in minutes) to use during simulation"
+               ["-i" (str "--runinterval RUNINTERVAL" "interval (in minutes)"
+                          " to use during simulation. This option"
+                          " requires some temporary filesystem space, which"
+                          " will be allocated in TMPDIR (if set in the"
+                          " environment) or java.io.tmpdir.")
                 :parse-fn #(Integer/parseInt %)]
                ["-n" "--numhosts NUMHOSTS" "How many hosts to use during simulation (required)"
                 :parse-fn #(Integer/parseInt %)]
@@ -385,79 +393,28 @@
   (jitter (time/minus (time/now) run-interval)
           (time/in-seconds run-interval)))
 
-(defn partition-into-buckets [num-buckets s]
-  (loop [s s
-         buckets (into clojure.lang.PersistentQueue/EMPTY
-                       (repeat num-buckets '()))]
-    (if (seq s)
-      (recur (rest s)
-             (conj (pop buckets)
-                   (cons (first s) (first buckets))))
-      (seq buckets))))
-
-(defn make-jms-nippy-message
-  "Create a jms message containing the clojure data structure 'payload' encoded
-  into a byte array using nippy."
-  [session payload]
-  (let [msg (.createBytesMessage session)
-        payload-bytes (nippy/freeze payload)]
-    (.writeBytes msg payload-bytes)
-    msg))
-
-(defn unpack-jms-nippy-message
-  "Return the clojure data payload from a message created with
-  'make-jms-nippy-message'."
-  [msg]
-  (let [bytes (byte-array (.getBodyLength msg))]
-    (.readBytes msg bytes)
-    (nippy/thaw bytes)))
-
-(deftype AMQBrokerBuffer [^BrokerService broker
-                          ^Session session
-                          ^MessageProducer producer
-                          ^MessageConsumer consumer
-                          mq-dir
-                          queue-count]
+(deftype TempFileBuffer [storage-dir q]
   Buffer
   (full? [this] false)
   (remove! [this]
-    (swap! queue-count dec)
-    (mq/commit-or-rollback session (unpack-jms-nippy-message (.receive consumer))))
+    (let [path (.poll q)
+          result (nippy/thaw (Files/readAllBytes path))]
+      (Files/delete path)
+      result))
   (add!* [this item]
-    (swap! queue-count inc)
-    (mq/commit-or-rollback session (.send producer (make-jms-nippy-message session item))))
+    (let [path (Files/createTempFile storage-dir "bench-tmp-" ""
+                                     (into-array FileAttribute []))]
+      (Files/write path (nippy/freeze item) (into-array OpenOption []))
+      (.add q path)))
   (close-buf! [this]
-    (println "Shutting down AMQ...")
-    (reset! queue-count 0)
-    (amq/stop-broker! broker)
-    (fs/delete-dir mq-dir))
+    true)
   clojure.lang.Counted
-  (count [this] @queue-count))
+  (count [this] (.size q)))
 
-(defn amq-broker-buffer [broker-name endpoint-name]
-  (let [dir (kitchensink/absolute-path broker-name)
-        conn-str (str "vm://" broker-name
-                      "?broker.useJmx=false"
-                      "&broker.enableStatistics=false"
-                      "&jms.useCompression=true"
-                      "&jms.copyMessageOnSend=false")
-        size-megs 20000
-        broker (amq/build-embedded-broker broker-name
-                                         dir
-                                         {:store-usage size-megs
-                                          :temp-usage  size-megs})
-        _ (println "Using amq in" dir)
-        _ (.setPersistent broker false)
-        _ (amq/start-broker! broker)
-        factory (amq/activemq-connection-factory conn-str)
-        connection (doto (.createConnection factory) .start)
-        session (.createSession connection true 0)]
-    (AMQBrokerBuffer. broker
-                      session
-                      (.createProducer session (.createQueue session endpoint-name))
-                      (.createConsumer session (.createQueue session endpoint-name))
-                      dir
-                      (atom 0))))
+(defn message-buffer
+  [storage-dir expected-size]
+  (let [q (ArrayDeque. expected-size)]
+    (TempFileBuffer. storage-dir q)))
 
 (defn relay-messages-at-rate
   "Relay messages from in-ch to out-ch at the given rate in
@@ -494,43 +451,132 @@
   [mq numhosts run-interval pdb-host catalogs reports facts]
   (println-err (trs "Populating queue in the background"))
   (doseq [host (random-hosts numhosts pdb-host catalogs reports facts)
-          :while (>!! mq (assoc host :lastrun
-                                (rand-lastrun run-interval)))]
+          :while (>!! mq (assoc host :lastrun (rand-lastrun run-interval)))]
     true)
   (println-err (trs "Finished populating queue")))
 
+(defn close-and-drain-channel
+  "Closes channel and then drains it.  On exception, prints it to
+  *err* and returns false, otherwise returns true.  If channel is
+  already closed, returns true."
+  [channel]
+  (try
+    (close! channel)
+    (while (<!! channel) true)
+    true
+    (catch Exception ex
+      (println-err ex)
+      false)))
+
+(defn delete-dir-or-report [dir]
+  (try
+    (fs/delete-dir dir)
+    (catch Exception ex
+      (println-err ex))))
+
+(def ^:dynamic *fill-queue-final-timeout* 10000)  ; in ms
+
+(defn start-filling-queue
+  "Starts a daemon thread to fill queue and returns a function to
+  request that the thread halt.  Ensures that tmpdir is eventually
+  deleted.  Upon error, tmpdir is deleted here, and upon success, it
+  will have been registered for deletion at shutdown."
+  [mq numhosts run-interval pdb-host catalogs reports facts tmpdir]
+  (try
+    (println-err (trs "Using scratch dir {0}" (pr-str (str tmpdir))))
+    (let [fill-started (promise)
+          fill-queue (doto (Thread.
+                            #(do
+                               (deliver fill-started true)
+                               (populate-queue mq numhosts run-interval
+                                               pdb-host
+                                               catalogs reports facts)))
+                       (.setDaemon true))
+          fill-finished? (fn [timeout]
+                           (.join fill-queue timeout)
+                           (.isAlive fill-queue))
+          await-fill #(or (fill-finished? 500)
+                          (do
+                            (println-err (trs "Waiting up to 10s for shutdown"))
+                            (fill-finished? *fill-queue-final-timeout*))
+                          (do
+                            (trs "Unable to verify queue thread has stopped")
+                            false))
+          ;; Use delay as one-shot
+          stop (delay
+                (close-and-drain-channel mq)
+                @fill-started ;; So we know it's OK to join
+                (let [result (await-fill)]
+                  (delete-dir-or-report tmpdir)
+                  result))
+          stopper #(deref stop)]
+      (.addShutdownHook (Runtime/getRuntime) (Thread. stopper))
+      (.start fill-queue)
+      stopper)
+    (catch Exception ex
+      (delete-dir-or-report tmpdir)
+      (throw ex))))
+
+
 (defn cycle-commands
+  "Populates the message queue with messages, and then cycles through
+  those messages, sending and altering each one every time it
+  reappears at the head of the queue.  Returns a stop function of no
+  arguments that can be used to effect an orderly shutdown."
   [numhosts run-interval rand-perc simulation-threads
    rate-monitor-ch command-send-ch
    pdb-host catalogs reports facts]
-  (let [close-to-stop-ch (chan)
-        mq (chan (amq-broker-buffer "benchmark-mq" "benchmark-endpoint"))]
-
-    ;; be sure to clear the temp queue on exit
-    (.addShutdownHook (Runtime/getRuntime) (Thread. #(close! mq)))
-
-    (future
-      (populate-queue mq numhosts run-interval
-                      pdb-host
-                      catalogs reports facts))
-
-    (let [run-interval-minutes (time/in-minutes run-interval)
-          hosts-per-second (/ numhosts (* run-interval-minutes 60))
-          rate-limited-mq-out (chan)]
-      (relay-messages-at-rate mq rate-limited-mq-out hosts-per-second)
-      (pipeline simulation-threads
-                mq
-                (map #(update-host % rand-perc (time/now) command-send-ch))
-                rate-limited-mq-out)
-      (go
-        (<! close-to-stop-ch)
-        (mapv close! [rate-limited-mq-out mq rate-monitor-ch command-send-ch])))
-    close-to-stop-ch))
+  ;; All of the work that needs to be completed on a SIGINT, etc. is
+  ;; coordinated via shutdown hook(s) waiting on daemon thread(s) --
+  ;; because after a signal, only daemon threads, shutdown hooks, and
+  ;; finalizers will still run, and daemon threads will only run until
+  ;; all of the hooks and finalizers are finished.
+  (let [preftmp (get-path (or (System/getenv "TMPDIR")
+                              (System/getProperty "java.io.tmpdir")))
+        tmpdir (Files/createTempDirectory preftmp
+                                          "pdb-bench-"
+                                          (into-array FileAttribute []))
+        mq (try
+             (-> (.resolve tmpdir "q")
+                 (doto fs/mkdir)
+                 (message-buffer numhosts)
+                 chan)
+             (catch Exception ex
+               (delete-dir-or-report tmpdir)
+               (throw ex)))
+        stop-fill (start-filling-queue mq numhosts run-interval pdb-host
+                                       catalogs reports facts
+                                       tmpdir)
+        rate-limited-mq-out (chan)
+        channels [rate-limited-mq-out mq rate-monitor-ch command-send-ch]
+        stop (delay
+              ;; Currently assumes that it's ok to leave already
+              ;; in-flight "channel takes" running.  i.e. stop
+              ;; precipitates a stop, but doesn't hang around for
+              ;; anything but the queue deletion.  Also, we don't
+              ;; bother to try to close any of the channels during
+              ;; shutdown shutdown because all those (non-daemon)
+              ;; threads should be dead.
+              (let [close-err? (not-every? identity
+                                           (map close-and-drain-channel
+                                                channels))
+                    stop-fill-ok? (stop-fill)]
+                (and (not close-err?)
+                     stop-fill-ok?)))
+        run-interval-minutes (time/in-minutes run-interval)
+        hosts-per-second (/ numhosts (* run-interval-minutes 60))]
+    (relay-messages-at-rate mq rate-limited-mq-out hosts-per-second)
+    (pipeline simulation-threads
+              mq
+              (map #(update-host % rand-perc (time/now) command-send-ch))
+              rate-limited-mq-out)
+    #(deref stop)))
 
 (defn benchmark
-  "Feeds commands to PDB as requested by args.  Returns either nil, or
-  if --runinterval is active, a stop function accepting no arguments
-  that can be called to stop processing and clean up."
+  "Feeds commands to PDB as requested by args.  If --runinterval has
+  been specified, returns a function that can be called to stop
+  processing and clean up.  That function returns true or false to
+  indicate whether the shutdown encountered any problems."
   [args]
   (let [{:keys [config rand-perc numhosts nummsgs threads] :as options} (validate-cli! args)
         _ (logutils/configure-logging! (get-in config [:global :logging-config]))
@@ -538,7 +584,6 @@
         {pdb-host :host pdb-port :port
          :or {pdb-host "127.0.0.1" pdb-port 8080}} (:jetty config)
         base-url (utils/pdb-cmd-base-url pdb-host pdb-port :v1)
-        ;; Create an agent for each host
         command-send-ch (if nummsgs
                           (chan)
                           (chan (dropping-buffer 10000)))
@@ -549,14 +594,16 @@
                                    (if reports 1 0)
                                    (if facts 1 0))]
 
-    (start-rate-monitor rate-monitor-ch run-interval commands-per-puppet-run)
-
-    (dotimes [_ threads]
-      (start-command-sender base-url command-send-ch rate-monitor-ch))
-
     (when-not catalogs (log/info (trs "No catalogs specified; skipping catalog submission")))
     (when-not reports (log/info (trs "No reports specified; skipping report submission")))
     (when-not facts (log/info (trs "No facts specified; skipping fact submission")))
+
+    (start-rate-monitor rate-monitor-ch run-interval commands-per-puppet-run)
+
+    ;; We don't have to worry about these core.async threads during
+    ;; shutdown because they appear to be non-daemon, and so just dead.
+    (dotimes [_ threads]
+      (start-command-sender base-url command-send-ch rate-monitor-ch))
 
     (if nummsgs
       (do
@@ -566,10 +613,23 @@
           (>!! command-send-ch :stop))
         (close! command-send-ch)
         nil)
-      (let [stop-chan (cycle-commands numhosts run-interval rand-perc simulation-threads
-                                      rate-monitor-ch command-send-ch
-                                      pdb-host catalogs reports facts)]
-        #(close! stop-chan)))))
+      ;; Run as a daemon thread so it's not just dead during shutdown
+      (let [result (promise)]
+        (doto (Thread.
+               #(try
+                  (deliver result
+                           [(cycle-commands numhosts run-interval rand-perc
+                                            simulation-threads
+                                            rate-monitor-ch command-send-ch
+                                            pdb-host catalogs reports facts)])
+                  (catch Exception ex
+                    (deliver result ex))))
+          (.setDaemon true)
+          .start)
+        (let [x @result]
+          (if (vector? x)
+            (first x)
+            (throw x)))))))
 
 (defn -main [& args]
   (when-let [stop (benchmark args)]
