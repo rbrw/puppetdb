@@ -74,7 +74,7 @@
   (try
     (json/parse-string (slurp file))
     (catch Exception e
-      (log/error (trs "Error parsing {0}; skipping" file)))))
+      (println-err (trs "Error parsing {0}; skipping" file)))))
 
 (defn load-sample-data
   "Load all .json files contained in `dir`."
@@ -87,7 +87,7 @@
                     (filterv (complement nil?)))]
       (if (seq data)
         data
-        (log/error
+        (println-err
          (trs "Supplied directory {0} contains no usable data!" dir))))))
 
 (def producers (vec (repeatedly 4 #(random-string 10))))
@@ -250,7 +250,7 @@
    is recursive to accumulate possible catalog mutations (i.e. changing a previously
    mutated catalog as opposed to different mutations of the same catalog)."
   [hosts num-msgs rand-percentage command-send-ch]
-  (log/info
+  (println-err
    (trs "Sending {0} messages for {1} hosts, will exit upon completion"
         num-msgs (count hosts)))
   (loop [mutated-hosts hosts
@@ -352,7 +352,7 @@
                    base-url host version payload)
                   ::submitted))
     (catch Exception e
-      (println "Exception while submitting command: " e)
+      (println-err (trs "Exception while submitting command: {0}" e))
       ::error)))
 
 (defn start-command-sender
@@ -383,9 +383,11 @@
           (if (> time-diff 5000)
             (let [time-diff-seconds (/ time-diff 1000)
                   messages-per-second (float (/ events-since-last-report time-diff-seconds))]
-              (println "Sending" messages-per-second "messages/s"
-                       "(load equivalent to" (int (/ messages-per-second expected-node-message-rate)) "nodes)")
-              (flush)
+              (println-err
+               (trs
+                "Sending {0} messages/s (load equivalent to {1} nodes)"
+                messages-per-second
+                (int (/ messages-per-second expected-node-message-rate))))
               (recur 0 t))
             (recur (inc events-since-last-report) last-report-time)))))))
 
@@ -594,9 +596,12 @@
                                    (if reports 1 0)
                                    (if facts 1 0))]
 
-    (when-not catalogs (log/info (trs "No catalogs specified; skipping catalog submission")))
-    (when-not reports (log/info (trs "No reports specified; skipping report submission")))
-    (when-not facts (log/info (trs "No facts specified; skipping fact submission")))
+    (when-not catalogs
+      (println-err (trs "No catalogs specified; skipping catalog submission")))
+    (when-not reports
+      (println-err (trs "No reports specified; skipping report submission")))
+    (when-not facts
+      (println-err (trs "No facts specified; skipping fact submission")))
 
     (start-rate-monitor rate-monitor-ch run-interval commands-per-puppet-run)
 
