@@ -1181,7 +1181,7 @@
     "   fact_path_id bigint not null,"
     "   value_integer bigint,"
     "   value_float double precision,"
-    "   value_type_id integer not null,"
+    "   value_type_id bigint not null,"
     "   value_string text,"
     "   value jsonb,"
     "   large_value_hash bytea,"

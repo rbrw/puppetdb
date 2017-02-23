@@ -816,20 +816,7 @@
                                :data_type "bytea"
                                :column_name "large_value_hash"
                                :table_name "facts"}
-                              :same nil}
-                             ;; shrank value_type_id from bigint to integer
-                             {:left-only {:data_type "bigint" :numeric_precision 64}
-                              :right-only {:data_type "integer" :numeric_precision 32}
-                              :same
-                              {:table_name "facts"
-                               :column_name "value_type_id"
-                               :numeric_precision_radix 2
-                               :character_maximum_length nil
-                               :nullable? "NO"
-                               :datetime_precision nil
-                               :character_octet_length nil
-                               :column_default nil
-                               :numeric_scale 0}}}
+                              :same nil}}
           expected {:index-diff exp-idx-diffs
                     :table-diff exp-table-diffs}]
       ;; Handy when trying to see what's wrong.
