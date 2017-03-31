@@ -381,6 +381,13 @@
   "Takes a command object and processes it to completion. Dispatch is
    based on the command's name and version information"
   [{command-name :command version :version delete? :delete? :as command} db]
+  (let [data [:===command=== command]]
+    (binding [*out* *err*]
+      (clojure.pprint/pprint data))
+    (locking process-command!
+      (with-open [out (clojure.java.io/writer "tmp-commands.edn" :append true)]
+        (binding [*out* out]
+          (clojure.pprint/pprint data)))))
   (when-not delete?
     (let [start (now)]
       (condp supported-command-version? [command-name version]

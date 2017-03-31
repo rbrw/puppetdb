@@ -27,6 +27,10 @@ Puppet::Reports.register_report(:puppetdb) do
     nil
   end
 
+  def redact_sensitive_params(msg, resources)
+    PP.pp([msg, resources], $stderr)
+  end
+
   # Convert `self` (an instance of `Puppet::Transaction::Report`) to a hash
   # suitable for sending over the wire to PuppetDB
   #
@@ -50,6 +54,10 @@ Puppet::Reports.register_report(:puppetdb) do
       defaulted_noop_pending = defined?(noop_pending) ? noop_pending : nil
       defaulted_corrective_change = defined?(corrective_change) ? corrective_change : nil
 
+      foo_logs = build_logs_list
+      redact_sensitive_params 'foo resources:', resources
+      redact_sensitive_params 'foo logs:', foo_logs
+
       {
         "certname" => host,
         "puppet_version" => puppet_version,
@@ -64,7 +72,7 @@ Puppet::Reports.register_report(:puppetdb) do
         "noop" => is_noop,
         "noop_pending" => defaulted_noop_pending,
         "corrective_change" => defaulted_corrective_change,
-        "logs" => build_logs_list,
+        "logs" => foo_logs,
         "metrics" => build_metrics_list,
         "resources" => resources,
         "catalog_uuid" => defaulted_catalog_uuid,
