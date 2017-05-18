@@ -66,6 +66,25 @@ matrix:
         PUPPETSERVER_VERSION=master
       jdk: oraclejdk8
 
+
+    # postgres 10 (optional)
+    - env: >
+        NAME=unit-openjdk8
+        PDB_TEST_PG=10
+        PDB_TEST_LANG=clojure
+        PDB_TEST_SELECTOR=:unit
+      jdk: openjdk8
+
+    - env: >
+        NAME=integration-latest-puppet-openjdk8
+        PDB_TEST_PG=10
+        PDB_TEST_LANG=clojure
+        PDB_TEST_SELECTOR=:integration
+        PUPPET_VERSION=latest
+        PUPPETSERVER_VERSION=master
+      jdk: openjdk8
+
+
 before_install: ext/travisci/install_puppetserver.sh
 script: ext/travisci/test.sh
 
