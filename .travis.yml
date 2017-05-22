@@ -8,64 +8,63 @@ sudo: required
 
 matrix:
   include:
-    # terminus unit tests (spec tests)
-    - env: >
-        NAME=rspec-puppet-4.0
-        PDB_TEST_LANG=ruby
-        PUPPET_VERSION=4.0.0
+    # # terminus unit tests (spec tests)
+    # - env: >
+    #     NAME=rspec-puppet-4.0
+    #     PDB_TEST_LANG=ruby
+    #     PUPPET_VERSION=4.0.0
 
-    - env: >
-        NAME=rspec-puppet-latest
-        PDB_TEST_LANG=ruby
-        PUPPET_VERSION=latest
+    # - env: >
+    #     NAME=rspec-puppet-latest
+    #     PDB_TEST_LANG=ruby
+    #     PUPPET_VERSION=latest
 
-    # pdb unit tests
-    - env: >
-        NAME=unit-openjdk8
-        PDB_TEST_LANG=clojure
-        PDB_TEST_SELECTOR=:unit
-      jdk: openjdk8
+    # # pdb unit tests
+    # - env: >
+    #     NAME=unit-openjdk8
+    #     PDB_TEST_LANG=clojure
+    #     PDB_TEST_SELECTOR=:unit
+    #   jdk: openjdk8
 
-    - env: >
-        NAME=unit-oracle8
-        PDB_TEST_LANG=clojure
-        PDB_TEST_SELECTOR=:unit
-      jdk: oraclejdk8
+    # - env: >
+    #     NAME=unit-oracle8
+    #     PDB_TEST_LANG=clojure
+    #     PDB_TEST_SELECTOR=:unit
+    #   jdk: oraclejdk8
 
 
-    # pdb + terminus + puppetserver + puppet integration tests
-    - env: >
-        NAME=integration-stable-openjdk8
-        PDB_TEST_LANG=clojure
-        PDB_TEST_SELECTOR=:integration
-        PUPPET_VERSION=4.8.0
-        PUPPETSERVER_VERSION=2.7.2
-      jdk: openjdk8
+    # # pdb + terminus + puppetserver + puppet integration tests
+    # - env: >
+    #     NAME=integration-stable-openjdk8
+    #     PDB_TEST_LANG=clojure
+    #     PDB_TEST_SELECTOR=:integration
+    #     PUPPET_VERSION=4.8.0
+    #     PUPPETSERVER_VERSION=2.7.2
+    #   jdk: openjdk8
 
-    - env: >
-        NAME=integration-latest-puppet-openjdk8
-        PDB_TEST_LANG=clojure
-        PDB_TEST_SELECTOR=:integration
-        PUPPET_VERSION=latest
-        PUPPETSERVER_VERSION=master
-      jdk: openjdk8
+    # - env: >
+    #     NAME=integration-latest-puppet-openjdk8
+    #     PDB_TEST_LANG=clojure
+    #     PDB_TEST_SELECTOR=:integration
+    #     PUPPET_VERSION=latest
+    #     PUPPETSERVER_VERSION=master
+    #   jdk: openjdk8
 
-    - env: >
-        NAME=integration-stable-oraclejdk8
-        PDB_TEST_LANG=clojure
-        PDB_TEST_SELECTOR=:integration
-        PUPPET_VERSION=4.8.0
-        PUPPETSERVER_VERSION=2.7.2
-      jdk: oraclejdk8
+    # - env: >
+    #     NAME=integration-stable-oraclejdk8
+    #     PDB_TEST_LANG=clojure
+    #     PDB_TEST_SELECTOR=:integration
+    #     PUPPET_VERSION=4.8.0
+    #     PUPPETSERVER_VERSION=2.7.2
+    #   jdk: oraclejdk8
 
-    - env: >
-        NAME=integration-latest-puppet-oraclejdk8
-        PDB_TEST_LANG=clojure
-        PDB_TEST_SELECTOR=:integration
-        PUPPET_VERSION=latest
-        PUPPETSERVER_VERSION=master
-      jdk: oraclejdk8
-
+    # - env: >
+    #     NAME=integration-latest-puppet-oraclejdk8
+    #     PDB_TEST_LANG=clojure
+    #     PDB_TEST_SELECTOR=:integration
+    #     PUPPET_VERSION=latest
+    #     PUPPETSERVER_VERSION=master
+    #   jdk: oraclejdk8
 
     # postgres 10 (optional)
     - env: >
@@ -81,11 +80,10 @@ matrix:
         PDB_TEST_LANG=clojure
         PDB_TEST_SELECTOR=:integration
         PUPPET_VERSION=latest
-        PUPPETSERVER_VERSION=master
+        PUPPETSERVER_VERSION=2.7.2
       jdk: openjdk8
 
-
-before_install: ext/travisci/install_puppetserver.sh
+before_install: echo WINDING UP $(date) && ext/travisci/install_puppetserver.sh
 script: ext/travisci/test.sh
 
 notifications:
