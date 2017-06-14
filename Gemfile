@@ -46,7 +46,7 @@ group :test do
   # end
 
   # PDB 5 requires Puppet 5, which is not yet released, so always get it from git for now
-  gem 'puppet', :git => 'https://github.com/puppetlabs/puppet.git',
+  gem 'puppet', :git => 'https://github.com/joshcooper/puppet.git',
       :branch => puppet_branch, :require => false
 
   gem 'mocha', '~> 1.0'

@@ -12,7 +12,7 @@ matrix:
     - env: >
         NAME=rspec-puppet-master
         PDB_TEST_LANG=ruby
-        PUPPET_VERSION=master
+        PUPPET_VERSION=4884df86e2d1305d5e275241b94fdbd941a6229c
 
     # pdb unit tests
     - env: >
@@ -33,7 +33,7 @@ matrix:
         NAME=integration-master-puppet-openjdk8
         PDB_TEST_LANG=clojure
         PDB_TEST_SELECTOR=:integration
-        PUPPET_VERSION=master
+        PUPPET_VERSION=4884df86e2d1305d5e275241b94fdbd941a6229c
         PUPPETSERVER_VERSION=master
       jdk: openjdk8
 
@@ -41,7 +41,7 @@ matrix:
         NAME=integration-master-puppet-oraclejdk8
         PDB_TEST_LANG=clojure
         PDB_TEST_SELECTOR=:integration
-        PUPPET_VERSION=master
+        PUPPET_VERSION=4884df86e2d1305d5e275241b94fdbd941a6229c
         PUPPETSERVER_VERSION=master
       jdk: oraclejdk8
 

@@ -44,5 +44,7 @@ fi
 bundle install --without acceptance
 lein install-gems
 
-echo "Getting puppet source, using branch ${PUPPET_VERSION}"
-git clone https://github.com/puppetlabs/puppet vendor/puppet -b "$PUPPET_VERSION"
+echo "Getting puppet source, using ${PUPPET_VERSION} from joshcooper"
+git clone https://github.com/joshcooper/puppet vendor/puppet
+cd vendor/puppet
+git checkout "$PUPPET_VERSION"
