@@ -978,8 +978,6 @@
       str
       json/parse-string))
 
-;;; Classic Facts
-
 (def ps-chunksize 6000)
 
 (defn realize-paths!
@@ -1348,9 +1346,6 @@
   [report :- reports/report-wireformat-schema
    received-timestamp :- pls/Timestamp]
   (add-report!* report received-timestamp true))
-
-(def ^:dynamic *orphaned-path-gc-limit* 200)
-(def ^:dynamic *orphaned-value-gc-limit* 200)
 
 (defn garbage-collect!
   "Delete any lingering, unassociated data in the database"
