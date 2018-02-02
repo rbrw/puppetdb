@@ -28,18 +28,18 @@ lein-pprint() {
 # and adjust the project.clj to match.
 
 server_version="$PUPPETSERVER_VERSION"
-if test -z "$PUPPETSERVER_VERSION"
+if test -z "$server_version"
 then
     server_version="$(lein-pprint :pdb-puppetserver-test-version)"
 fi
 test "$server_version"
 
-git clone -b "$PUPPETSERVER_VERSION" https://github.com/puppetlabs/puppetserver
+git clone -b "$server_version" https://github.com/puppetlabs/puppetserver
 cd puppetserver
 lein install
 cd ..
 
-if test "$PUPPETSERVER_VERSION"
+if test "$PUPPETSERVER_VERSION"  # i.e. we're not using the default version
 then
     update_dependency_var project.clj puppetserver-version "$server_version"
 fi
