@@ -1,6 +1,9 @@
 language: generic
 dist: trusty
 
+git:
+  depth: 3
+
 # Always explicitly set sudo.  Otherwise travis' defaults may vary
 # based on when the repository testing was enabled.
 sudo: required
@@ -8,47 +11,65 @@ sudo: required
 aliases:
   - &pg-ver 9.6
 
+  - &run-core-tests
+    stage: ❧ pdb tests
+    addons:
+      postgresql: *pg-ver
+    services: postgresql
+    script: ext/travisci/run-core-tests
+
+  - &run-rspec-tests
+    stage: ❧ pdb tests
+    env: PDB_TEST=rspec/pup-5.3.x
+    script: ext/travisci/run-rspec-tests 5.3.x
+
 jobs:
   include:
 
-    # === core tests
-    - stage: ❧ pdb tests
-      env: PDB_TEST=core/openjdk8
-      addons:
-        postgresql: *pg-ver
-      services: postgresql
-      script: jdk_switcher use openjdk8 && ext/travisci/run-core-tests
+    # - <<: *run-core-tests
+    #   env: PDB_TEST=core/openjdk8
+    # - <<: *run-core-tests
+    #   env: PDB_TEST=core/oraclejdk8
 
-    - stage: ❧ pdb tests
+    - <<: *run-core-tests
       env: PDB_TEST=core/oraclejdk8
-      addons:
-        postgresql: *pg-ver
-      services: postgresql
-      script: jdk_switcher use oraclejdk8 && ext/travisci/run-core-tests
+      os: osx
+      script: brew install bash && ext/travisci/run-core-tests
 
-    # === integration tests
-    - stage: ❧ pdb tests
-      env: PDB_TEST=int/openjdk8/pup-5.3.x/srv-5.1.x
-      addons:
-        postgresql: *pg-ver
-      services: postgresql
-      script: >-
-        jdk_switcher use openjdk8
-        && ext/travisci/run-integration-tests 5.3.x 5.1.x
+    # - <<: *run-core-tests
+    #   env: PDB_TEST=core/oraclejdk8
 
-    - stage: ❧ pdb tests
-      env: PDB_TEST=int/oraclejdk8/pup-5.3.x/srv-5.1.x
-      addons:
-        postgresql: *pg-ver
-      services: postgresql
-      script: >-
-        jdk_switcher use oraclejdk8
-        && ext/travisci/run-integration-tests 5.3.x 5.1.x
 
-    # === rspec tests
-    - stage: ❧ pdb tests
-      env: PDB_TEST=rspec/pup-5.3.x
-      script: ext/travisci/run-rspec-tests 5.3.x
+    # - stage: ❧ pdb tests
+    #   env: PDB_TEST=core/oraclejdk8
+    #   addons:
+    #     postgresql: *pg-ver
+    #   services: postgresql
+    #   script: jdk_switcher use oraclejdk8 && ext/travisci/run-core-tests
+
+    # # === integration tests
+    # - stage: ❧ pdb tests
+    #   env: PDB_TEST=int/openjdk8/pup-5.3.x/srv-5.1.x
+    #   addons:
+    #     postgresql: *pg-ver
+    #   services: postgresql
+    #   script: >-
+    #     jdk_switcher use openjdk8
+    #     && ext/travisci/run-integration-tests 5.3.x 5.1.x
+
+    # - stage: ❧ pdb tests
+    #   env: PDB_TEST=int/oraclejdk8/pup-5.3.x/srv-5.1.x
+    #   addons:
+    #     postgresql: *pg-ver
+    #   services: postgresql
+    #   script: >-
+    #     jdk_switcher use oraclejdk8
+    #     && ext/travisci/run-integration-tests 5.3.x 5.1.x
+
+    # - <<: *run-rspec-tests
+    #   os: linux
+    # - <<: *run-rspec-tests
+    #   os: osx
 
 before_install: ext/bin/host-info
 

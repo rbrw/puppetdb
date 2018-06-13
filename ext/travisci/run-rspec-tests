@@ -5,8 +5,19 @@ set -uxeo pipefail
 test "$#" -eq 1
 puppet_ref="$1"
 
-ulimit -u 4096
 ruby -v
+
+if test "$TRAVIS"; then
+    case "$OSTYPE" in
+        darwin*)
+            gem install -v 1.16.1 --user-install bundler
+            ;;
+        linux*)
+            ulimit -u 4096
+            ;;
+    esac
+fi
+
 ext/bin/config-puppet-test-ref "$puppet_ref"
 cd puppet
 bundle exec rspec spec

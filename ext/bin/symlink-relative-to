@@ -6,7 +6,7 @@ target="$1"
 link_name="$2"
 
 case "$OSTYPE" in
-    darwin)
+    darwin*)
         if test -z "$(type -t realpath)"; then
             echo "$script_name: realpath missing; please install coreutils" 1>&2
             exit 2

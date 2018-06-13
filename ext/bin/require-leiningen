@@ -2,6 +2,7 @@
 
 set -uexo pipefail
 
+script_home="$(cd "$(dirname "$0")" && pwd)"
 cmdname="$(basename "$0")"
 
 usage() {
@@ -37,7 +38,7 @@ trap "$(printf 'rm -rf %q' "$tmpdir")" EXIT
 
 cd "$tmpdir"
 curl -O "https://raw.githubusercontent.com/technomancy/leiningen/$ver/bin/lein"
-obshash="$(sha256sum < lein | cut -d' ' -f1)"
+obshash="$("$script_home/sha256sum" < lein | cut -d' ' -f1)"
 cd ..
 
 if test "$obshash" != "$hash"; then

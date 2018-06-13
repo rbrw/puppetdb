@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 
+exit 0
 
 ######################################################
 ## This script is deprecated!

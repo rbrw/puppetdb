@@ -2,7 +2,46 @@
 
 set -uxeo pipefail
 
-ulimit -u 4096
+check_jdk_ver()
+{
+    local test_jdk maj cur_ver
+    test_jdk="$1"
+    maj="${test_jdk: -1}"
+    cur_ver="$(java -version 2>&1 | head -1)"
+
+    # Ensure we have the expected major version
+    [[ "$cur_ver" =~ \ \"1\.${maj}\.[0-9]+_[0-9]+\"$ ]]
+
+    # Ensure we have the expected flavor
+    case "$cur_ver" in
+        oracle*) [[ "$test_jdk" =~ ^java\ version ]] ;;
+        openjdk*) [[ "$test_jdk" =~ ^openjdk\ version ]] ;;
+    esac
+}
+
+test_type="${PDB_TEST%%/*}"
+test "$test_type" = core
+
+test_jdk="${PDB_TEST##*/}"
+case "$test_jdk" in
+    openjdk*|oraclejdk*) ;;
+    *) exit 2 ;;
+esac
+
+case "$OSTYPE" in
+    darwin*) ;;
+    *) ulimit -u 4096 ;;
+esac
+
+case "$OSTYPE" in
+    darwin*) ;;
+    *) jdk_switcher use "$test_jdk" ;;
+esac
+java -version
+check_jdk_ver "$test_jdk"
+
+
+
 
 tmpdir="$(mktemp -d "int-test-XXXXXX")"
 trap "$(printf 'rm -rf %q' "$tmpdir")" EXIT
@@ -14,6 +53,16 @@ java -version
 lein version
 
 test $# -eq 0
+
+ps aux | grep postgre
+
+which pg_ctl
+
+pg_ctl start
+
+#case "$OSTYPE" in
+#    darwin*) brew services start postgresql ;;
+#esac
 
 pgdir="$(pwd)/test-resources/var/pg"
 export PGHOST=127.0.0.1

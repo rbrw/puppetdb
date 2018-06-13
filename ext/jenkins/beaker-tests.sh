@@ -1,5 +1,7 @@
 #!/bin/bash -e
 
+exit 0
+
 echo "**********************************************"
 echo "PARAMS FROM UPSTREAM:"
 echo ""
