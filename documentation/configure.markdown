@@ -257,10 +257,25 @@ PuppetDB stores its data in PostgreSQL.
 
 ### Facts Blacklist
 
-Optional. Set by declaring `facts-blacklist` in the PuppetDB configuration file. If you provide comma-separated fact names (in the case of an INI config file) or a list of fact names (in the case of a HOCON config file), PuppetDB ignores those facts on ingestion.
+Optional. Set by declaring `facts-blacklist` in the PuppetDB configuration file.
+If you provide comma-separated fact names (in the case of an INI config file) or
+a list of fact names (in the case of a HOCON config file), PuppetDB ignores those
+facts on ingestion. The facts-blacklist defaults to literal matches on fact names
+but can be configured to accept valid [Java regular expresions](https://docs.oracle.com/javase/8/docs/api/java/util/regex/Pattern.html)
+for matching by setting `facts-blacklist-type = regex`. These regex patterns
+should be submitted using the `facts-blacklist` configuration option following
+the appropriate format based on configuration file type. The example below shows
+an INI file configuration using regex matching which ignores any fact with a
+prefix of foo or suffix of bar. Note that commas are used as a seperator and
+should not be included in regex patterns. Whitespace is trimmed and shouldn't be
+relied upon in literal or regex matching.
 
- * INI: `fact1, fact2, fact3`
- * HOCON: `["fact1", "fact2", "fact3"]`
+ * INI: `facts-blacklist = fact1, fact2, fact3`
+ * HOCON: `facts-blacklist = ["fact1", "fact2", "fact3"]`
+
+#### example facts-blacklist regex INI config
+ * `facts-blacklist = foo.*, .*bar`
+ * `facts-blacklist-type = regex`
 
 ### Using PostgreSQL
 
