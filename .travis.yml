@@ -17,21 +17,22 @@ aliases:
     jdk="$(ext/travisci/jdk-from-spec "$PDB_TEST")"
     if test "$(uname)" = Linux; then jdk_switcher use "$jdk"; fi
     ext/travisci/prep-os-essentials-for "$PDB_TEST"
-    pgbin="$(ext/travisci/pgbin-from-spec "$PDB_TEST")"
-    ext/bin/boxed-core-tests --pgbin "$pgbin" -- lein test
+    pgver="$(ext/travisci/prefixed-ref-from-spec "$PDB_TEST" pg-)"
+    ext/bin/test-config --set pgver "$pgver"
+    ext/bin/test-config --set pgport 34335
+    ext/bin/boxed-core-tests -- lein test
 
   - &run-integration-tests |
     set -e
     jdk="$(ext/travisci/jdk-from-spec "$PDB_TEST")"
     if test "$(uname)" = Linux; then jdk_switcher use "$jdk"; fi
     ext/travisci/prep-os-essentials-for "$PDB_TEST"
-    pgbin="$(ext/travisci/pgbin-from-spec "$PDB_TEST")"
+    pgver="$(ext/travisci/prefixed-ref-from-spec "$PDB_TEST" pg-)"
     puppet="$(ext/travisci/prefixed-ref-from-spec "$PDB_TEST" pup-)"
     server="$(ext/travisci/prefixed-ref-from-spec "$PDB_TEST" srv-)"
-    ext/bin/boxed-integration-tests \
-      --pgbin "$pgbin" \
-      --puppet "$puppet" \
-      --server "$server" \
+    ext/bin/test-config --set pgver "$pgver"
+    ext/bin/test-config --set pgport 34335
+    ext/bin/boxed-integration-tests --puppet "$puppet" --server "$server" \
       -- lein test :integration
 
 jobs:
