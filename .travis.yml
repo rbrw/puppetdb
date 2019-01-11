@@ -22,15 +22,15 @@ services:
 aliases:
   - &run-core-and-ext-tests |
     set -e
-    jdk="$(ext/travisci/jdk-from-spec "$PDB_TEST")"
-    jdkver="${jdk##*jdk}"
+    export PDB_JDK="$(ext/travisci/jdk-from-spec "$PDB_TEST")"
+    jdkver="${PDB_JDK##*jdk}"
     ext/travisci/prep-os-essentials-for "$PDB_TEST"
     case "$OSTYPE" in
       linux*)
         if test "$jdkver" -lt 9 ; then
-          jdk_switcher use "$jdk";
+          jdk_switcher use "$PDB_JDK";
         else
-          ext/bin/require-jdk "$jdk" ext/travisci/local
+          ext/bin/require-jdk "$PDB_JDK" ext/travisci/local
           export JAVA_HOME="$(pwd)/ext/travisci/local/jdk"
           export PATH="$JAVA_HOME/bin:$PATH"
         fi
@@ -57,15 +57,15 @@ aliases:
 
   - &run-integration-tests |
     set -e
-    jdk="$(ext/travisci/jdk-from-spec "$PDB_TEST")"
-    jdkver="${jdk##*jdk}"
+    export PDB_JDK="$(ext/travisci/jdk-from-spec "$PDB_TEST")"
+    jdkver="${PDB_JDK##*jdk}"
     ext/travisci/prep-os-essentials-for "$PDB_TEST"
     case "$OSTYPE" in
       linux*)
         if test "$jdkver" -lt 9 ; then
-          jdk_switcher use "$jdk";
+          jdk_switcher use "$PDB_JDK";
         else
-          ext/bin/require-jdk "$jdk" ext/travisci/local
+          ext/bin/require-jdk "$PDB_JDK" ext/travisci/local
           export JAVA_HOME="$(pwd)/ext/travisci/local/jdk"
           export PATH="$JAVA_HOME/bin:$PATH"
         fi

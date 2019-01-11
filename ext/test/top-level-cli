@@ -2,10 +2,15 @@
 
 set -uexo pipefail
 
-usage() { echo "Usage: [PDB_JAR=JAR] $(basename "$0")"; }
+usage() { echo "Usage: [PDB_JDK=openjdk10] [PDB_JAR=JAR] $(basename "$0")"; }
 misuse() { usage 1>&2; exit 2; }
 
 test $# -eq 0 || misuse
+
+expected_warnings=270
+if test "${PDB_JDK##*jdk}" -eq 10; then
+  expected_warnings=738
+fi
 
 tmpdir="$(mktemp -d "test-top-level-cli-XXXXXX")"
 tmpdir="$(cd "$tmpdir" && pwd)"
@@ -24,9 +29,9 @@ cat "$tmpdir/out" "$tmpdir/err"
 test "$rc" -eq 0
 grep -F 'Available subcommands:' "$tmpdir/out"
 grep -E 'Display version information' "$tmpdir/out"
-# FIXME: this should and will be 0 once we fix the pos-int?,
+# FIXME: this should and will be 0 once we fix the pos-int?, dynapath,
 # etc. replacement warnings.
-test $(wc -c < "$tmpdir/err") -eq 270
+test $(wc -c < "$tmpdir/err") -eq $expected_warnings
 
 rc=0
 ./pdb version 1>"$tmpdir/out" 2>"$tmpdir/err" || rc=$?
@@ -34,6 +39,6 @@ cat "$tmpdir/out" "$tmpdir/err"
 test "$rc" -eq 0
 grep -E '^version=' "$tmpdir/out"
 grep -E '^target_schema_version=' "$tmpdir/out"
-# FIXME: this should and will be 0 once we fix the pos-int?,
+# FIXME: this should and will be 0 once we fix the pos-int?, dynapath,
 # etc. replacement warnings.
-test $(wc -c < "$tmpdir/err") -eq 270
+test $(wc -c < "$tmpdir/err") -eq $expected_warnings
