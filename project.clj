@@ -100,8 +100,9 @@
                  [org.apache.commons/commons-compress "1.10"]
                  [ring/ring-core :exclusions [javax.servlet/servlet-api org.clojure/tools.reader]]
 
-                 ;; Pin version for PDB-3809
-                 [com.fasterxml.jackson.core/jackson-databind "2.9.7"]]
+                 ;; Pin version for CVE-2018-5968 (PDB-3809),
+                 ;; CVE-2018-19360, CVE-2018-19361, CVE-2018-19362.
+                 [com.fasterxml.jackson.core/jackson-databind "2.9.8"]]
 
   :jvm-opts ~(if need-permgen?
               ["-XX:MaxPermSize=200M"]
