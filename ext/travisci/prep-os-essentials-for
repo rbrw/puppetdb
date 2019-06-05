@@ -3,7 +3,7 @@
 set -uxeo pipefail
 
 usage() {
-    echo 'Usage: $(basename "$0") PDB_TEST_SPEC'
+    echo 'Usage: $(basename "$0") PDB_TEST_SPEC ENV_CMDS_DEST'
 }
 
 misuse() {
@@ -29,12 +29,15 @@ apt_get_update() {
     echo Executed apt-get update $i times;
 }
 
-test $# -eq 1 || misuse
+test $# -eq 2 || misuse
 spec="$1"
+env_dest="$2"
 
 jdk="$(ext/bin/jdk-from-spec "$spec")"
 jdkver="${jdk##*jdk}"
 pgver="$(ext/travisci/prefixed-ref-from-spec "$spec" pg-)"
+
+echo -n > "$env_dest"
 
 case "$OSTYPE" in
     darwin*)
@@ -70,8 +73,28 @@ case "$OSTYPE" in
             exit 3
             ;;
         esac
+        # Note the leading tabs, though it's only critical that it be
+        # tabs for the EOS line.
+        cat >> "$env_dest" <<-EOS
+	export JAVA_HOME="/Library/Java/JavaVirtualMachines/adoptopenjdk-$jdkver.jdk/Contents/Home"
+	export PATH="$JAVA_HOME/bin:$PATH"
+	hash -r
+	EOS
         ;;
     *)
+        # workaround for mongodb, CouchDB and git-lfs having invalid keys
+        # see: https://github.com/travis-ci/travis-ci/issues/9037 (which is still broken)
+        sudo rm -f /etc/apt/sources.list.d/mongodb*
+        sudo rm -f /etc/apt/sources.list.d/couchdb*
+        sudo apt-key adv --keyserver keyserver.ubuntu.com --recv-keys 762E3157
+        # adoptopenjdk
+        wget -qO - https://adoptopenjdk.jfrog.io/adoptopenjdk/api/gpg/key/public \
+            | sudo -i apt-key add -
+        sudo -i add-apt-repository --yes https://adoptopenjdk.jfrog.io/adoptopenjdk/deb/
+        apt_get_update
+
+        sudo -i apt-get install "adoptopenjdk-$jdkver-hotspot"
+
         # Can't use travis "addons" support for pg 11 until this is
         # resolved: https://github.com/travis-ci/travis-ci/issues/5737
 
@@ -83,12 +106,8 @@ case "$OSTYPE" in
         sudo apt-get purge \
              postgresql{,-client}-{9.2,9.3,9.4,9.5,9.6} \
              postgresql-client-common postgresql-client postgresql-common
-        # workaround for mongodb, CouchDB and git-lfs having invalid keys
-        # see: https://github.com/travis-ci/travis-ci/issues/9037 (which is still broken)
-        sudo rm -f /etc/apt/sources.list.d/mongodb*
-        sudo rm -f /etc/apt/sources.list.d/couchdb*
-        sudo apt-key adv --keyserver keyserver.ubuntu.com --recv-keys 762E3157
-        apt_get_update
-        sudo -i apt-get -y install postgresql-9.6 postgresql-11
+        sudo -i apt-get -y install \
+             postgresql-9.6 postgresql-contrib-9.6 \
+             postgresql-11
         ;;
 esac

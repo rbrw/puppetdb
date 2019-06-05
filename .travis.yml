@@ -1,5 +1,5 @@
 language: generic
-dist: trusty
+dist: xenial
 
 # Always explicitly set sudo.  Otherwise travis' defaults may vary
 # based on when the repository testing was enabled.
@@ -21,21 +21,15 @@ aliases:
     set -e
     jdk="$(ext/bin/jdk-from-spec "$PDB_TEST")"
     jdkver="${jdk##*jdk}"
-    ext/travisci/prep-os-essentials-for "$PDB_TEST"
-    case "$OSTYPE" in
-      linux*)
-          jdk_switcher use "$jdk";
-        ;;
-      darwin*)
-        export JAVA_HOME="/Library/Java/JavaVirtualMachines/adoptopenjdk-$jdkver.jdk/Contents/Home"
-        export PATH="$JAVA_HOME/bin:$PATH"
-        hash -r
-        ;;
-      *)
-        echo "$OSTYPE is not a supported system" 1>&2
-        exit 2
-        ;;
-    esac
+    unset JAVA_HOME
+    # Easier than PATH surgery (defer to adoptopenjdk)
+    sudo -i rm -rf /usr/local/lib/jvm
+    ext/travisci/prep-os-essentials-for "$PDB_TEST" prep-os-essentials-tmp.env
+    source prep-os-essentials-tmp.env  # e.g. maybe java env, etc.
+    update-java-alternatives -l || true
+    java -version
+    which java
+    type -p java
     mkdir -p ext/travisci/local
     export PATH="$(pwd)/ext/travisci/local/bin:$PATH"
     ext/bin/require-leiningen default ext/travisci/local
@@ -95,20 +89,12 @@ jobs:
       script: *run-core-and-ext-tests
 
     - stage: ❧ pdb tests
-      env: PDB_TEST=core+ext/oraclejdk8/pg-9.6
-      script: *run-core-and-ext-tests
-
-    - stage: ❧ pdb tests
       env: PDB_TEST=core+ext/openjdk8/pg-11
       script: *run-core-and-ext-tests
 
     # === integration tests
     - stage: ❧ pdb tests
       env: PDB_TEST=int/openjdk8/pup-5.5.x/srv-5.3.x/pg-9.6
-      script: *run-integration-tests
-
-    - stage: ❧ pdb tests
-      env: PDB_TEST=int/oraclejdk8/pup-5.5.x/srv-5.3.x/pg-9.6
       script: *run-integration-tests
 
     - stage: ❧ pdb tests
