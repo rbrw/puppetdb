@@ -1,0 +1,21 @@
+
+container:
+  image: debian:buster
+  #image: openjdk:8-jdk
+  cpu: 4
+  memory: 16
+
+task:
+  script: |
+    set -xe
+    export PDB_TEST="core+ext/openjdk11/pg-11"
+    export DEBIAN_FRONTEND=noninteractive
+    adduser --disabled-password --gecos '' pdb
+    apt update
+    apt-get install -y python gnupg procps curl git make
+    free -h
+    mount
+    ext/travisci/prep-os-essentials-for "$PDB_TEST" prep-os-essentials-tmp.env
+    source prep-os-essentials-tmp.env
+    chown -R pdb:pdb .
+    su pdb -c ext/cirrusci/run-test

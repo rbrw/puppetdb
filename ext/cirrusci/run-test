@@ -1,0 +1,14 @@
+#!/usr/bin/env bash
+
+set -xe
+
+mkdir -p ext/travisci/local
+export PATH="$(pwd)/ext/travisci/local/bin:$PATH"
+ext/bin/require-leiningen default ext/travisci/local
+ext/bin/require-pgbox default ext/travisci/local
+pgver="$(ext/travisci/prefixed-ref-from-spec "$PDB_TEST" pg-)"
+ext/bin/test-config --set pgver "$pgver"
+ext/bin/test-config --set pgport 34335
+ext/bin/check-spec-env "$PDB_TEST"
+ext/bin/boxed-core-tests -- lein test
+ext/bin/run-external-tests
