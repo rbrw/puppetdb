@@ -5,16 +5,27 @@ from sys import exit, stderr
 import os, sys
 
 def usage(stream):
-    print('Usage: prefixed-ref-from-spec .../pup-5.5.x/srv-5.3.x/pg-9.6 srv-',
+    print('Usage: prefixed-ref-from-spec [--optional] .../pup-5.5.x/srv-5.3.x/pg-9.6 srv-',
           file=stream)
 
 def misuse():
     usage(stderr)
     exit(2)
 
-len(sys.argv) == 3 or misuse()
-specs, prefix = sys.argv[1:]
+argv, optional = sys.argv, False
+if argv and argv[1] == '--optional':
+    argv = argv[1:]
+    optional = True
+
+len(argv) == 3 or misuse()
+specs, prefix = argv[1:]
 specs = specs.split('/')
 specs = [x for x in specs if x.startswith(prefix)]
-len(specs) == 1 or misuse()
-print(specs[0][len(prefix):])
+
+if len(specs) == 1:
+    print(specs[0][len(prefix):])
+
+if len(specs) == 0 and optional:
+    sys.exit(0)
+
+misuse()

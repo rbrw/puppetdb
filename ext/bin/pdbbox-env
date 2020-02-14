@@ -20,4 +20,8 @@ export PDB_TEST_DB_USER_PASSWORD="$(cat "$PDBBOX/test-pass")"
 export PDB_TEST_DB_ADMIN=pdb_test_admin
 export PDB_TEST_DB_ADMIN_PASSWORD="$(cat "$PDBBOX/test-pass-admin")"
 
+if test "$PDB_TEST_PG_TZ"; then
+    export TZ="$PDB_TEST_PG_TZ"
+fi
+
 exec pgbox env "$@"

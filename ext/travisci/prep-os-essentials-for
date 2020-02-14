@@ -85,6 +85,26 @@ case "$flavor" in
         esac
         mkdir -p ext/travisci/local
         ext/bin/require-jdk --expire "$jdk" ext/travisci/local
+
+        tz_offset="$(ext/travisci/prefixed-ref-from-spec --optional "$spec" tz)"
+        # The direction is pdb (or everything, really) relative to
+        # pg, and the "side" of UTC.
+        case "$tz_offset" in
+            +)
+                echo "export TZ=UTC+3:15" >> "$env_dest"
+                echo "export PDB_TEST_PG_TZ=UTC+2:15" >> "$env_dest"
+                ;;
+            -)
+                echo "export TZ=UTC-8:15" >> "$env_dest"
+                echo "export PDB_TEST_PG_TZ=UTC-7:15" >> "$env_dest"
+                ;;
+            *)
+                echo "Unrecognized tz offset request in PDB_TEST=$PDB_TEST" \
+                     1>&2
+                exit 2
+                ;;
+        esac
+
         cat >> "$env_dest" <<-EOS
 	export JAVA_HOME="$(pwd)/ext/travisci/local/jdk"
 	export PATH="\$JAVA_HOME/bin:$PATH"
