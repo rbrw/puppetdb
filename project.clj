@@ -176,6 +176,7 @@
                  [clj-commons/fs]
                  [metrics-clojure]
                  [robert/hooke "1.3.0"]
+                 [seancorfield/next.jdbc "1.0.424"]
                  [slingshot]
                  [trptcolin/versioneer]
                  ;; We do not currently use this dependency directly, but

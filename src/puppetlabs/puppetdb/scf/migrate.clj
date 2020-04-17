@@ -53,6 +53,7 @@
   (:require [clojure.java.jdbc :as sql]
             [clojure.tools.logging :as log]
             [clojure.string :as string]
+            [next.jdbc :as dbn]
             [puppetlabs.puppetdb.cheshire :as json]
             [puppetlabs.puppetdb.utils :refer [flush-and-exit]]
             [puppetlabs.kitchensink.core :as kitchensink]
@@ -1865,9 +1866,36 @@
   (let [event-count (-> "select count(*) from reports_premigrate"
                         jdbc/query-to-vec first :count)
         last-logged (atom (.getTime (java.util.Date.)))
-        reports-migrated (atom 0)]
-    (jdbc/call-with-query-rows
-      ["select * from (
+        reports-migrated (atom 0)
+
+        old-cols [:id :transaction_uuid :certname :puppet_version :report_format
+                  :configuration_version :start_time :end_time :receive_time :noop
+                  :environment_id :status_id :metrics_json :logs_json :producer_timestamp
+                  :metrics :logs :resources :catalog_uuid :cached_catalog_status :code_id
+                  :producer_id :noop_pending :corrective_change :job_id]
+        new-cols (into [:hash] old-cols)
+        update-row (apply juxt (comp sutils/munge-hash-for-storage
+                                     hash/report-identity-hash)
+                          old-cols)]
+    (reduce
+     (fn [_ row]
+       (swap! reports-migrated inc)
+       (let [updated-row (update-row row)
+             table-name (str "reports_" (-> updated-row
+                                            (get 15) ;; producer_timestamp
+                                            (partitioning/to-zoned-date-time)
+                                            (partitioning/date-suffix)))]
+         (jdbc/insert! table-name new-cols updated-row))
+       (let [now (.getTime (java.util.Date.))]
+         (when (> (- now @last-logged) 60000)
+           (maplog :info
+                   {:migration 74 :at @reports-migrated :of event-count}
+                   #(trs "Migrated {0} of {1} reports" (:at %) (:of %)))
+           (reset! last-logged now)))
+       nil)
+     nil
+     (dbn/plan (:connection jdbc/*db*)
+               ["select * from (
           select
             id, transaction_uuid, certname, puppet_version, report_format, configuration_version, start_time, end_time,
             receive_time, noop, environment_id, status_id, metrics_json, logs_json, producer_timestamp, metrics, logs,
@@ -1879,36 +1907,7 @@
                                 order by receive_time asc )
           from reports_premigrate) as sub
         where row_number = 1"]
-      ;; set the FetchSize used by jdbc to avoid any potential OOM errors caused
-      ;; by fetching too many large reports at once
-      {:fetch-size 1}
-      (fn [rows]
-        (let [old-cols [:id :transaction_uuid :certname :puppet_version :report_format
-                        :configuration_version :start_time :end_time :receive_time :noop
-                        :environment_id :status_id :metrics_json :logs_json :producer_timestamp
-                        :metrics :logs :resources :catalog_uuid :cached_catalog_status :code_id
-                        :producer_id :noop_pending :corrective_change :job_id]
-              new-cols (into [:hash] old-cols)
-              update-row (apply juxt (comp sutils/munge-hash-for-storage
-                                           hash/report-identity-hash)
-                                old-cols)
-              insert->hash (fn [row]
-                             (swap! reports-migrated + 1)
-                             (let [updated-row (update-row row)
-                                   table-name (str "reports_" (-> updated-row
-                                                                  (get 15) ;; producer_timestamp
-                                                                  (partitioning/to-zoned-date-time)
-                                                                  (partitioning/date-suffix)))]
-                               (jdbc/insert! table-name new-cols updated-row))
-                             (let [now (.getTime (java.util.Date.))]
-                               (when (> (- now @last-logged) 60000)
-                                 (maplog :info
-                                         {:migration 74 :at @reports-migrated :of event-count}
-                                         #(trs "Migrated {0} of {1} reports" (:at %) (:of %)))
-                                 (reset! last-logged now))))]
-          (run! insert->hash rows)))))
-
-  ;; migrate data
+               {:fetch-size 1})))
 
   (jdbc/do-commands
    ;; attach sequence
