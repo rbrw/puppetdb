@@ -5,6 +5,8 @@
             [clojure.java.jdbc :as sql]
             [clojure.tools.logging :as log]
             [clojure.set :refer [rename-keys]]
+            [puppetlabs.puppetdb.metrics.core :refer [metrics-registries]]
+            [metrics.histograms :as histogram :refer [histogram]]
             [puppetlabs.i18n.core :refer [trs tru]]
             [puppetlabs.kitchensink.core :as kitchensink]
             [puppetlabs.puppetdb.query.paging :as paging]
@@ -23,6 +25,13 @@
             [puppetlabs.puppetdb.utils :as utils]
             [puppetlabs.puppetdb.query-eng.engine :as eng]
             [schema.core :as s]))
+
+;; FIXME: maybe another registry...
+(def db-metrics-reg (get-in metrics-registries [:database :registry]))
+
+(def query-metrics
+  {:query-databse-waits (histogram db-metrics-reg "query time waiting on database (ms)")
+   :query-consumer-waits (histogram db-metrics-reg "time waiting on query consumer (ms)")})
 
 (def entity-fn-idx
   (atom
@@ -149,8 +158,12 @@
      (jdbc/with-transacted-connection scf-read-db
        (let [{:keys [results-query]}
              (query->sql remaining-query entity version paging-options)]
-         (jdbc/call-with-array-converted-query-rows results-query
-                                                    (comp row-fn munge-fn)))))))
+         (jdbc/call-with-monitored-array-converted-query-rows
+          results-query
+          {}
+          (comp row-fn munge-fn)
+          (:query-consumer-waits query-metrics)
+          (:query-databse-waits query-metrics)))))))
 
 ;; Do we still need this, i.e. do we need the pass-through, and the
 ;; strict selectivity in the caller below?
@@ -206,13 +219,16 @@
               resp (http/streamed-response
                     buffer
                     (try (jdbc/with-transacted-connection scf-read-db
-                           (jdbc/call-with-array-converted-query-rows
+                           (jdbc/call-with-monitored-array-converted-query-rows
                             results-query
+                            {}
                             (comp #(http/stream-json % buffer pretty-print)
                                   #(do (when-not (instance? PGobject %)
                                          (first %))
                                        (deliver query-error nil) %)
-                                  munge-fn)))
+                                  munge-fn)
+                            (:query-consumer-waits query-metrics)
+                            (:query-databse-waits query-metrics)))
                          (catch java.sql.SQLException e
                            (deliver query-error e))))]
           (if @query-error

@@ -6,6 +6,7 @@
   (:require [clojure.java.jdbc :as sql]
             [clojure.string :as string]
             [clojure.tools.logging :as log]
+            [metrics.histograms :as histogram]
             [puppetlabs.kitchensink.core :as kitchensink]
             [clojure.string :as str]
             [puppetlabs.puppetdb.time :as pl-time]
@@ -268,6 +269,54 @@
              (.cancel stmt)
              (throw e))))))))
 
+(defn millisec-interval [before after]
+  (pl-time/in-millis (pl-time/interval before after)))
+
+(defn metered-seq [s push-metric pull-metric]
+  (let [push-start (pl-time/now)]
+    (lazy-seq
+     (let [pull-start (pl-time/now)]
+       (histogram/update! push-metric (millisec-interval push-start pull-start))
+       (when-let [s (seq s)]
+         (let [x (first s)
+               pull-wait (millisec-interval pull-start (pl-time/now))]
+           (histogram/update! pull-metric pull-wait)
+           (cons x (metered-seq (rest s) push-metric pull-metric))))))))
+
+(defn ^:deprecated call-with-monitored-array-converted-query-rows
+  "Calls (f rows), where rows is a lazy sequence of rows generated
+  from within a transaction.  Converts any java.sql.Array
+  or (.isArray (class v)) values to a vector.  The sequence is backed
+  by an active database cursor which will be closed when f returns.
+  Cancels the query if f throws an exception.  The option names that
+  correspond to jdbc/result-set-seq options will affect the rows
+  produced as they do for that function.  So for example, when
+  as-arrays? is logically true, the result rows will be vectors, not
+  maps, and the first result row will be a vector of column names.
+  Note that this function is deprecated.  Please prefer
+  call-with-query-rows, and apply any necessary conversions directly
+  to each row.  (Most columns cannot be arrays.)"
+  ([[sql & params]
+    {:keys [as-arrays? identifiers qualifier read-columns fetch-size] :as opts}
+    f
+    push-metric
+    pull-metric]
+   (with-db-transaction []
+     (with-open [stmt (.prepareStatement ^Connection (:connection *db*) sql)]
+       (doall (map-indexed (fn [i param] (.setObject stmt (inc i) param))
+                           params))
+       (.setFetchSize stmt (or fetch-size 500))
+       (let [fix-vals (if as-arrays?
+                        #(mapv any-sql-array->vec %)
+                        #(kitchensink/mapvals any-sql-array->vec %))]
+         (with-open [rset (.executeQuery stmt)]
+           (try
+             (f (map fix-vals (metered-seq (sql/result-set-seq rset opts)
+                                           pull-metric push-metric)))
+             (catch Exception e
+               ;; Cancel the current query
+               (.cancel stmt)
+               (throw e)))))))))
 
 (defn ^:deprecated call-with-array-converted-query-rows
   "Calls (f rows), where rows is a lazy sequence of rows generated
