@@ -596,6 +596,12 @@
 
     (when-let [v (version/version)]
       (log/info (trs "PuppetDB version {0}" v)))
+
+    (when (> 1 (count (conf/reduce-section conj database [])))
+      (throw
+       (ex-info "Currently unable to migrate multiple databases (see config)"
+                {:kind ::must-migrate-multiple-databases})))
+
     (init-with-db database config)
 
     (if upgrade-and-exit?
@@ -730,8 +736,8 @@
           ::invalid-database-configuration
           (stop (invalid-conf-msg (:failed-validation data)) 1)
 
-          ::migration-required
-          (stop (.getMessage ex) (int \m))
+          ::migration-required (stop (.getMessage ex) (int \m))
+          ::must-migrate-multiple-databases (stop (.getMessage ex) 2)
 
           ;; Unrecognized -- pass it on.
           (throw ex))))))
