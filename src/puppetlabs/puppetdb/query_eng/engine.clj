@@ -2074,9 +2074,9 @@
 
       (not (second (first candidates)))
       (throw (IllegalArgumentException.
-              (tru "Received ''{0}'' clause without an argument" clause))))
+              (tru "Received ''{0}'' clause without an argument" clause)))
 
-      :else (second (first candidates))))
+      :else (-> candidates first second))))
 
 (defn process-order-by
   [clauses]
