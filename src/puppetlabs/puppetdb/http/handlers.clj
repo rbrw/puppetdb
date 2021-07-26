@@ -169,7 +169,7 @@
                             :else (http-q/restrict-query-to-active-nodes req))))
                   (http-q/extract-query-pql
                    (merge-param-specs typical-params
-                                      {:optional ["ast_only"]
+                                      {:optional ["ast_only" "origin"]
                                        :required ["query"]}))))))
 
 (pls/defn-validated events-routes :- bidi-schema/RoutePair

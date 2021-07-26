@@ -413,8 +413,9 @@
         (user-query->engine-query version query-map query-config warn-experimental)]
 
     (when log-queries
-      ;; log the AST of the incoming query
-      (log/infof "%s:%s:%s" "PDBQuery" log-id (:query query-map)))
+      ;; Log origin and AST of incoming query
+      (log/infof "PDBQuery:%s:%s"
+                 log-id (-> ((juxt :origin :query) query-map) pr-str)))
 
     (try
       (jdbc/with-transacted-connection scf-read-db

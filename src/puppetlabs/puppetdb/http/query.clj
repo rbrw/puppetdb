@@ -46,6 +46,7 @@
    (s/optional-key :include_package_inventory) (s/maybe s/Bool)
    (s/optional-key :order_by) (s/maybe [[(s/one s/Keyword "field")
                                          (s/one (s/enum :ascending :descending) "order")]])
+   (s/optional-key :origin) (s/maybe s/Str)
    (s/optional-key :distinct_resources) (s/maybe s/Bool)
    (s/optional-key :distinct_start_time) s/Any
    (s/optional-key :distinct_end_time) s/Any
@@ -265,6 +266,10 @@
       :else
       params)))
 
+(defn parse-origin
+  [origin]
+  origin)
+
 (pls/defn-validated convert-query-params :- puppetdb-query-schema
   "This will update a query map to contain the parsed and validated query parameters"
   [full-query param-spec]
@@ -273,6 +278,7 @@
       keywordize-keys
       (update-when [:ast_only] coerce-to-boolean)
       (update-when [:order_by] parse-order-by)
+      (update-when [:origin] parse-origin)
       (update-when [:limit] parse-limit)
       (update-when [:offset] parse-offset)
       (update-when [:include_total] coerce-to-boolean)
