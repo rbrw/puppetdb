@@ -156,7 +156,7 @@
   :pedantic? :abort
 
   :dependencies [[org.postgresql/postgresql]
-                 [org.clojure/clojure]
+                 [org.clojure/clojure "1.10.3"]
                  [org.clojure/core.async]
                  [org.clojure/core.match "0.3.0-alpha4"]
                  [org.clojure/core.memoize]
@@ -324,9 +324,10 @@
                             :target-path "target-gems"
                             :dependencies ~puppetserver-test-deps}
              :ci {:plugins [[lein-pprint "1.1.1"]]}
-             ; We only want to include bouncycastle in the FOSS uberjar.
-             ; PE should be handled by selecting the proper bouncycastle jar
-             ; at runtime (standard/fips)
+             ;; We only want to include bouncycastle in the FOSS uberjar.
+             ;; PE should be handled by selecting the proper bouncycastle jar
+             ;; at runtime (standard/fips)
+             :kaocha {:dependencies [["lambdaisland/kaocha" "1.0.887"]]}
              :uberjar {:dependencies [[org.bouncycastle/bcpkix-jdk15on]]
                        :aot ~pdb-aot-namespaces}}
 
@@ -364,6 +365,7 @@
                             "trampoline" "run" "-m" "puppetlabs.puppetdb.integration.install-gems"
                             ~puppetserver-test-dep-gem-list
                             "--config" "./test-resources/puppetserver/puppetserver.conf"]
+            "kaocha" ["with-profile" "+kaocha" "run" "-m" "kaocha.runner"]
             "clean" ~(pdb-run-clean pdb-clean-paths)
             "distclean" ~(pdb-run-clean pdb-distclean-paths)
             "time-shift-export" ^{:doc (clojure.string/join "" ["Shifts all timestamps from a PuppetDB archive with"
