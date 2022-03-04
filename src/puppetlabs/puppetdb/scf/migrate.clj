@@ -2255,7 +2255,7 @@
       (when-not (sutils/index-exists? "fact_paths_path_trgm")
         (log/info (trs "Creating additional index `fact_paths_path_trgm`"))
         (jdbc/do-commands
-         "CREATE INDEX fact_paths_path_trgm ON fact_paths USING gist (path gist_trgm_ops)"))
+         "CREATE INDEX fact_paths_path_trgm ON fact_paths USING gin (path gin_trgm_ops)"))
       (when-not (sutils/index-exists? "packages_name_trgm")
         (log/info (trs "Creating additional index `packages_name_trgm`"))
         (jdbc/do-commands
