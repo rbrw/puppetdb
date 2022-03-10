@@ -151,8 +151,18 @@
        first
        :current_schema))
 
+(pls/defn-validated table-exists? :- s/Bool
+  "Returns true if the table exists."
+  ([table :- s/Str]
+   (table-exists? table (current-schema)))
+  ([table :- s/Str namespace :- s/Str]
+   (-> "select 1 from pg_tables where tablename = ? and schemaname = ?"
+       (jdbc/query-to-vec table namespace)
+       first
+       boolean)))
+
 (pls/defn-validated index-exists? :- s/Bool
-  "Returns true if the index exists. Only supported on PostgreSQL currently."
+  "Returns true if the index exists."
   ([index :- s/Str]
    (let [schema (current-schema)]
      (index-exists? index schema)))
@@ -422,7 +432,9 @@
 (defn vacuum-analyze
   [db]
   (sql/with-db-connection [conn db]
-    (sql/execute! db ["vacuum analyze"] {:transaction? false})))
+    ;;(sql/execute! db ["vacuum analyze"] {:transaction? false})
+    true
+    ))
 
 (defn parse-db-hash
   [^PGobject db-hash]

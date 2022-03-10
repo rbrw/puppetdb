@@ -2,9 +2,10 @@
   "Handles all work related to database table partitioning"
   (:require [clojure.tools.logging :as log]
             [clojure.string :as str]
+            [puppetlabs.i18n.core :refer [trs]]
             [puppetlabs.puppetdb.jdbc :as jdbc]
-            [schema.core :as s]
-            [puppetlabs.i18n.core :refer [trs]])
+            [puppetlabs.puppetdb.scf.storage-utils :refer [table-exists?]]
+            [schema.core :as s])
 
   (:import (java.time LocalDateTime LocalDate ZoneId ZonedDateTime Instant)
            (java.time.temporal ChronoUnit)
@@ -169,3 +170,74 @@
                iso-week-year full-table-name)
        (format "CREATE UNIQUE INDEX IF NOT EXISTS idx_reports_id_%s ON %s USING btree (id)"
                iso-week-year full-table-name)])))
+
+
+(defn create-declarative-reports-partition
+  "Creates a reports partition for the day including the date."
+  [date]
+  (let [date (-> date to-zoned-date-time (.truncatedTo (ChronoUnit/DAYS)))
+        ;; REVIEW: double check these formatters, values from, etc.
+        ymdz (str/lower-case (.format date DateTimeFormatter/BASIC_ISO_DATE))
+        part (str/lower-case (str "reports_" ymdz))
+        y-m-d (str/lower-case (.format date DateTimeFormatter/BASIC_ISO_DATE))
+        next-y-m-d (str/lower-case (.format (.plusDays date 1) DateTimeFormatter/BASIC_ISO_DATE))]
+    ;; REVIEW: so we actually want this check? (i.e. maybe the callers should be fixed)
+    (when-not (table-exists? part)
+      (jdbc/do-commands
+       ["create table " part " partition of reports"
+        "  for values from ('" y-m-d "') to ('" next-y-m-d "')"]
+
+       ["create unique index " part "_id_idx on " part " using btree (id)"]
+       ["create unique index " part "_hash_expr_idx on " part
+        "  using btree (encode(hash, 'hex'::text))"]
+       ["create index " part "_certname_end_time_idx on " part
+        "  using btree (certname, end_time)"]
+       ["create index " part "_noop_pending_idx on " part
+        "  using btree (noop_pending) where noop_pending = true"]
+       ["create index " part "_producer_id_idx on " part " using btree (producer_id)"]
+
+       ["create index if not exists " part "_producer_timestamp_by_hour_certname_idx on " part
+        "  using btree (date_trunc('hour'::text, timezone('UTC'::text, producer_timestamp)),"
+        "               producer_timestamp, certname)"]
+
+       ["create index " part "_cached_catalog_status_on_fail_idx on " part
+        "  using btree (cached_catalog_status)"
+        "  where (cached_catalog_status = 'on_failure'::text)"]
+
+       ["create index " part "_catalog_uuid_idx on " part " using btree (catalog_uuid)"]
+       ["create index " part "_end_time_idx on " part " using btree (end_time)"]
+       ["create index " part "_environment_id_idx on " part " using btree (environment_id)"]
+       ["create index " part "_job_id_idx on " part " using btree (job_id)"
+        "  where job_id is not null"]
+       ["create index " part "_noop_idx on " part " using btree (noop) where noop = true"]
+       ["create index " part "_status_id_idx on " part " using btree (status_id)"]
+       ["create index " part "_tx_uuid_idx on " part " using btree (((transaction_uuid)::text))"]))))
+
+(defn create-declarative-events-partition
+  "Creates a resource events partition for the day including the date."
+  [date]
+  (let [date (-> date to-zoned-date-time (.truncatedTo (ChronoUnit/DAYS)))
+        ;; REVIEW: double check these formatters, values from, etc.
+        ymdz (str/lower-case (.format date DateTimeFormatter/BASIC_ISO_DATE))
+        part (str/lower-case (str "resource_events_" ymdz))
+        y-m-d (str/lower-case (.format date DateTimeFormatter/BASIC_ISO_DATE))
+        next-y-m-d (str/lower-case (.format (.plusDays date 1) DateTimeFormatter/BASIC_ISO_DATE))]
+    ;; REVIEW: so we actually want this check? (i.e. maybe the callers should be fixed)
+    (when-not (table-exists? part)
+      (jdbc/do-commands
+
+       ["create table " part " partition of resource_events"
+        "  for values from ('" y-m-d "') to ('" next-y-m-d "')"]
+
+       ["create index " part "_timestamp_idx on " part " using btree (timestamp)"]
+       ["create unique index " part "_hash_idx on " part " using btree (event_hash)"]
+       ["create index " part "_containing_class_idx on " part " using btree (containing_class)"]
+       ["create index " part "_property_idx on " part " using btree (property)"]
+       ["create index " part "_report_id_idx on " part " using btree (report_id)"]
+       ["create index " part "_type_title_ts_idx on " part
+        "  using btree (resource_type, resource_title, timestamp)"]
+       ["create index " part "_resource_title_idx on " part " using btree (resource_title)"]
+       ;; REVIEW: both?
+       ["create index " part "_status_idx on " part " using btree (status)"]
+       ["create index " part "_corrective_change_idx on " part " using btree (status)"
+        "  where corrective_change"]))))

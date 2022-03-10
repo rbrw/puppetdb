@@ -69,7 +69,9 @@
             [clojure.string :as str]
             [puppetlabs.puppetdb.scf.storage :as scf]
             [puppetlabs.puppetdb.scf.partitioning :as partitioning
-             :refer [get-temporal-partitions]])
+             :refer [create-declarative-events-partition
+                     create-declarative-reports-partition
+                     get-temporal-partitions]])
   (:import [org.postgresql.util PGobject]
            [java.time LocalDate ZonedDateTime ZoneId OffsetDateTime]
            (java.sql Timestamp)
@@ -2051,6 +2053,114 @@
     "  PRIMARY KEY (workspace_uuid, certname),"
     "  FOREIGN KEY (workspace_uuid) REFERENCES workspaces(uuid) ON DELETE CASCADE)"]))
 
+
+(defn migrate-reports-to-declarative-partitions
+  []
+
+  ;; FIXME: instead - alter table no inherit, adjust, attach to new reports
+  (doseq [part (partitioning/get-partition-names "reports")]
+    (jdbc/do-commands ["drop table " part]))
+  
+  (jdbc/do-commands
+
+   ;; FIXME: nope
+   ;;"drop table reports"
+   
+   ;; REVIEW: still needed?
+   ;; "ALTER SEQUENCE reports_id_seq OWNED BY NONE"
+   ;; "ALTER SEQUENCE reports_id_seq OWNED BY reports.id"
+   ;; set default value on new table DEFAULT nextval('reports_id_seq'::regclass)
+   ;; "ALTER TABLE reports ALTER COLUMN id SET DEFAULT nextval('reports_id_seq'::regclass)"
+
+   "alter sequence reports_id_seq owned by none"
+
+   "drop table reports cascade"
+   "drop table if exists reports_transform cascade"
+   
+   ["create table reports ("
+    "  id bigint not null default nextval('reports_id_seq'),"
+    "  hash bytea not null,"
+    "  transaction_uuid uuid,"
+    "  certname text not null,"
+    "  puppet_version text not null,"
+    "  report_format smallint not null,"
+    "  configuration_version text not null,"
+    "  start_time timestamp with time zone not null,"
+    "  end_time timestamp with time zone not null,"
+    "  receive_time timestamp with time zone not null,"
+    "  noop boolean,"
+    "  environment_id bigint,"
+    "  status_id bigint,"
+    "  metrics_json json,"
+    "  logs_json json,"
+    "  producer_timestamp timestamp with time zone not null,"
+    "  metrics jsonb,"
+    "  logs jsonb,"
+    "  resources jsonb,"
+    "  catalog_uuid uuid,"
+    "  cached_catalog_status text,"
+    "  code_id text,"
+    "  producer_id bigint,"
+    "  noop_pending boolean,"
+    "  corrective_change boolean,"
+    "  job_id text,"
+    "  report_type text not null default 'agent',"
+    "  foreign key (certname) references certnames(certname) on delete cascade,"
+    "  foreign key (environment_id) references environments(id) on delete cascade,"
+    "  foreign key (producer_id) references producers(id)," ; REVIEW: cascade?
+    "  foreign key (status_id) references report_statuses(id) on delete cascade"
+   ") partition by range (producer_timestamp)"]
+
+   "alter sequence reports_id_seq owned by reports.id"
+
+
+   ;; REVIEW: move these to be per-partition just for consistency?
+   ["create index reports_producer_timestamp_idx on reports"
+    "  using btree (producer_timestamp)"]
+
+   ["create index reports_compound_id_idx on reports"
+    "  using btree (producer_timestamp, certname, hash) where start_time is not null"]
+
+   ["create index reports_producer_timestamp_by_hour_certname_idx on reports"
+    "  using btree (date_trunc('hour'::text, timezone('UTC'::text, producer_timestamp)), producer_timestamp, certname)"]))
+
+(defn migrate-events-to-declarative-partitions
+  []
+
+  ;; FIXME: instead - alter table no inherit, adjust, attach to new reports
+  (doseq [part (partitioning/get-partition-names "resource_events")]
+    (jdbc/do-commands ["drop table " part]))
+  
+  (jdbc/do-commands
+
+   "drop table if exists resource_events cascade"
+   ;; resource events pkey?
+   
+   ["CREATE TABLE resource_events ("
+    "  event_hash bytea not null,"
+    "  report_id bigint not null,"
+    "  certname_id bigint not null,"
+    "  status text not null,"
+    "  \"timestamp\" timestamp with time zone not null,"
+    "  resource_type text not null,"
+    "  resource_title text not null,"
+    "  property text,"
+    "  new_value text,"
+    "  old_value text,"
+    "  message text,"
+    "  file text DEFAULT NULL::character varying,"
+    "  line integer,"
+    "  name text,"
+    "  containment_path text[],"
+    "  containing_class text,"
+    "  corrective_change boolean"
+    ") partition by range (\"timestamp\")"]))
+
+(defn switch-reports-and-events-to-declarative-partitions
+  []
+  (migrate-reports-to-declarative-partitions)
+  (migrate-events-to-declarative-partitions))
+
 (def migrations
   "The available migrations, as a map from migration version to migration function."
   {00 require-schema-migrations-table
@@ -2114,7 +2224,8 @@
    77 add-catalog-inputs-pkey
    78 add-catalog-inputs-hash
    79 add-report-partition-indexes-on-certname-end-time
-   80 add-workspaces-tables})
+   80 add-workspaces-tables
+   81 switch-reports-and-events-to-declarative-partitions})
    ;; Make sure that if you change the structure of reports
    ;; or resource events, you also update the delete-reports
    ;; cli command.
@@ -2194,14 +2305,15 @@
     true))
 
 (defn analyze-if-exists [tables]
-  (let [exists?  (->> "select tablename from pg_catalog.pg_tables"
-                      jdbc/query-to-vec
-                      (map :tablename)
-                      set)
-        tables (filter exists? tables)]
-    (log/info (trs "Updating table statistics for: {0}" (str/join ", " tables)))
-    (apply jdbc/do-commands-outside-txn
-           (map #(str "vacuum analyze " %) tables))))
+  ;; (let [exists?  (->> "select tablename from pg_catalog.pg_tables"
+  ;;                     jdbc/query-to-vec
+  ;;                     (map :tablename)
+  ;;                     set)
+  ;;       tables (filter exists? tables)]
+  ;;   (log/info (trs "Updating table statistics for: {0}" (str/join ", " tables)))
+  ;;   (apply jdbc/do-commands-outside-txn
+  ;;          (map #(str "vacuum analyze " %) tables)))
+  true)
 
 (defn- analyze-tables
   [requested]
@@ -2269,21 +2381,11 @@
          "alter table catalog_resources set (autovacuum_analyze_scale_factor = 0.01)"))
       nil)))
 
-(defn ensure-report-id-index []
-  (when-not (sutils/index-exists? "idx_reports_compound_id")
-    (log/info "Indexing reports for id queries")
-    (jdbc/do-commands
-     "create index idx_reports_compound_id on reports
-        (producer_timestamp, certname, hash)
-        where start_time is not null")
-    #{"reports"}))
-
 (defn create-indexes
   "Create missing indexes for applicable database platforms."
   []
   (set/union
-   (maybe-create-trgm-indexes)
-   (ensure-report-id-index)))
+   (maybe-create-trgm-indexes)))
 
 (defn note-migrations-finished
   "Currently just a hook used during testing."
@@ -2326,9 +2428,9 @@
 
       (jdbc/with-db-transaction []
         (require-schema-migrations-table)
-        (log/info (trs "Locking migrations table before migrating"))
-        (jdbc/do-commands
-         "lock table schema_migrations in access exclusive mode")
+        ;; (log/info (trs "Locking migrations table before migrating"))
+        ;; (jdbc/do-commands
+        ;;  "lock table schema_migrations in access exclusive mode")
         (require-valid-schema)
         (let [tables (set/union (run-migrations (pending-migrations))
                                 (create-indexes))]

@@ -1841,7 +1841,10 @@
       (store!)
       (catch org.postgresql.util.PSQLException e
         ;; 42P01 undefined table
-        (if (= "42P01" (.getSQLState e))
+        ;; 23514 check constraint violation (in this case, hopefully missing partition)
+        ;; FIXME: may not want to catch all check constraints...
+        (case (.getSQLState e)
+          ("42P01" "23514")
           (do
             ;; One or more partitions didn't exist, so attempt to create all
             ;; the partitions this report and its resource_events need
@@ -1849,14 +1852,15 @@
              db conn-status {:isolation :read-committed
                              :statement-timeout command-sql-statement-timeout-ms}
              (fn []
-               (partitioning/create-reports-partition producer-timestamp)
-               (doseq [date (set (map :timestamp
-                                      (:resource_events (normalize-report report))))]
-                 (partitioning/create-resource-events-partition date))))
+               (partitioning/create-declarative-reports-partition producer-timestamp)
+               (doseq [date (->> (:resource_events (normalize-report report))
+                                 (map #(-> (:timestamp %)
+                                           partitioning/to-zoned-date-time
+                                           (.truncatedTo (ChronoUnit/DAYS))))
+                                 set)]
+                 (partitioning/create-declarative-events-partition date))))
             ;; Now that the partitions exists, attempt store the report again
             (store!))
-          ;; otherwise throw the error so the command ends up
-          ;; in the DLO
           (throw e)))))))
 
 (def fact-path-gc-lock-timeout-ms
