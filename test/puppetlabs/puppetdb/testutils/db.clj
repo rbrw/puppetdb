@@ -319,7 +319,9 @@
   [n f]
   (if (pos? n)
     (with-test-db
-      (call-with-test-dbs (dec n) (partial f *db*)))
+      ;; REVIEW: could/should this be ...with-unconnected-...?
+      (call-with-test-dbs (dec n) (partial f {:read-config *read-db*
+                                              :write-config *db*})))
     (f)))
 
 (defn without-db-var
