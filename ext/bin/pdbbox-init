@@ -158,7 +158,20 @@ set-passwd pdb_test_admin "$pdbbox/test-pass-admin" "$tmp_dir"
 set-passwd pdb_test_migrator "$pdbbox/test-pass-migrator" "$tmp_dir"
 set-passwd pdb_test_read "$pdbbox/test-pass-read" "$tmp_dir"
 
+# Should/does the migrator loop until all the terminations succeed?
+
+# The migrator needs the pdb_test (writer) and pdb_test_read roles for
+# migrations, so it can terminate existing connections after locking
+# out new ones.
 pgbox env psql -c 'grant pdb_test to pdb_test_migrator'
+pgbox env psql -c 'grant pdb_test_read to pdb_test_migrator'
+pgbox env psql -c 'grant puppetdb to puppetdb_migrator'
+pgbox env psql -c 'grant puppetdb_read to puppetdb_migrator'
+
+# The write user needs the pdb_test_read role for the partition gc
+# bulldozer, so it can terminate any queries blocking the drop.
+pgbox env psql -c 'grant pdb_test_read to pdb_test'
+pgbox env psql -c 'grant puppetdb_read to puppetdb'
 
 # Creates a PuppetDB database. Loads necessary extensions, sets permissions
 setup-pdb()
