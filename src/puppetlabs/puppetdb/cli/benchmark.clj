@@ -81,7 +81,6 @@
                   HttpResponse$BodyHandlers)
    (java.nio.file.attribute FileAttribute)
    (java.nio.file Files OpenOption)
-   (java.util ArrayDeque)
    (java.util.concurrent RejectedExecutionException)))
 
 (defn- ssl-info->context
@@ -456,90 +455,35 @@
               (recur 0 t))
             (recur (inc events-since-last-report) last-report-time)))))))
 
-(defn delete-dir-or-report [dir]
-  (try
-    (fs/delete-dir dir)
-    (catch Exception ex
-      (println-err ex))))
-
 (def benchmark-shutdown-timeout 5000)
 
-(defn go-delete-dir-or-report [storage-dir]
-  ;; This function only exists to work around an eastwood complaint
-  ;; seen when the body was inline in the caller:
-  ;;
-  ;;   Exception thrown during phase :analyze+eval of linting namespace ...
-  ;;   Local name 'G__35008' has been given a type tag 'null' here:
-  ;;   nil
-  (go (delete-dir-or-report storage-dir)))
+(defn write-host-info [info path]
+  ;; FIXME: writes in-place; will be superceded by host-named files, etc.
+  (Files/write path (nippy/freeze info) (into-array OpenOption [])))
 
-(defn defer-file-buffer-item [path item]
-  (let [out (Files/newOutputStream path (into-array OpenOption []))]
-    (go
-      (try
-        (with-open [in (io/input-stream (nippy/freeze item))]
-          (io/copy in out))
-        path
-        (finally (.close out))))))
-
-(deftype TempFileBuffer [storage-dir q]
-  UnblockingBuffer
-  Buffer
-  (full? [_] false)
-  (remove! [_]
-    (let [path (<!! (.poll q))
-          result (nippy/thaw (Files/readAllBytes path))]
-      (Files/delete path)
-      result))
-
-  (add!* [_ item]
-    (let [path (Files/createTempFile storage-dir "bench-tmp-" ""
-                                     (into-array FileAttribute []))
-          ch (defer-file-buffer-item path item)]
-      (.add q ch)))
-
-  (close-buf! [_]
-    (.clear q)
-    (println-err (trs "Cleaning up temp files from {0}"
-                      (pr-str (str storage-dir))))
-    (async/alt!!
-      (go-delete-dir-or-report storage-dir)
-      (println-err (trs "Finished cleaning up temp files"))
-
-      (async/timeout benchmark-shutdown-timeout)
-      (println-err (trs "Cleanup timeout expired; leaving files in {0}"
-                        (pr-str (str storage-dir)))))
-    nil)
-
-  clojure.lang.Counted
-  (count [_] (.size q)))
-
-(defn message-buffer
-  [temp-dir expected-size]
-  (let [q (ArrayDeque. expected-size)
-        storage-dir (Files/createTempDirectory temp-dir
-                                               "pdb-bench-"
-                                               (into-array FileAttribute []))]
-    (TempFileBuffer. storage-dir q)))
-
-(defn random-hosts
-  [n offset pdb-host include-edges catalogs reports facts]
+(defn populate-hosts
+  "Returns a lazy sequence of initial host data file Paths, after
+  writing the data to a file in the temp-dir."
+  [n offset pdb-host include-edges catalogs reports facts temp-dir]
   (let [random-entity (fn [host entities]
                         (some-> entities
                                 rand-nth
                                 (assoc "certname" host)))]
     (for [i (range n)]
-      (let [host (str "host-" (+ offset i))]
-        {:host host
-         :catalog (when-let [cat (if include-edges
-                                   (random-entity host catalogs)
-                                   (assoc (random-entity host catalogs) "edges" []))]
-                    (update cat "resources"
-                            (partial map #(update % "tags"
-                                                  conj
-                                                  pdb-host))))
-         :report (random-entity host reports)
-         :factset (random-entity host facts)}))))
+      (let [host (str "host-" (+ offset i))
+            info {:host host
+                  :catalog (when-let [cat (if include-edges
+                                            (random-entity host catalogs)
+                                            (assoc (random-entity host catalogs)
+                                                   "edges" []))]
+                             (update cat "resources"
+                                     (partial map #(update % "tags" conj pdb-host))))
+                  :report (random-entity host reports)
+                  :factset (random-entity host facts)}
+            host-path (Files/createTempFile temp-dir "bench-tmp-" ""
+                                            (into-array FileAttribute []))]
+        (write-host-info info host-path)
+        host-path))))
 
 (defn progressing-timestamp
   "Return a function that will return a timestamp that progresses forward in time."
@@ -567,7 +511,7 @@
   uses numhosts and run-interval to run the simulation at a reasonable rate.
   Close read-ch to terminate the background process."
   [numhosts run-interval num-msgs end-commands-in rand-perc simulation-threads
-   write-ch read-ch include-edges]
+   mq-ch command-send-ch read-ch include-edges]
   (let [run-interval-minutes (time/in-minutes run-interval)
         hosts-per-second (/ numhosts (* run-interval-minutes 60))
         ms-per-message (/ 1000 hosts-per-second)
@@ -575,14 +519,18 @@
         progressing-timestamp-fn (progressing-timestamp numhosts num-msgs run-interval-minutes end-commands-in)]
     (async/pipeline-blocking
      simulation-threads
-     write-ch
-     (map (fn [host-state]
-            (let [deadline (+ (time/ephemeral-now-ns) (* ms-per-thread 1000000))
+     command-send-ch
+     (map (fn [host-path]
+            (let [host-state (nippy/thaw (Files/readAllBytes host-path))
+                  deadline (+ (time/ephemeral-now-ns) (* ms-per-thread 1000000))
                   new-host (update-host host-state include-edges rand-perc progressing-timestamp-fn)]
               (when (and (not num-msgs)
                          (> deadline (time/ephemeral-now-ns)))
                 ;; sleep until deadline
                 (Thread/sleep (int (/  (- deadline (time/ephemeral-now-ns)) 1000000))))
+              ;; REVIEW: do these before or after the sleep?
+              (write-host-info new-host host-path)
+              (>!! mq-ch host-path)
               new-host)))
      read-ch)))
 
@@ -663,13 +611,20 @@
         commands-per-puppet-run (+ (if catalogs 1 0)
                                    (if reports 1 0)
                                    (if facts 1 0))
+
         temp-dir (get-path (or (System/getenv "TMPDIR")
                                (System/getProperty "java.io.tmpdir")))
+        ;; FIXME: delete
+        host-dir (Files/createTempDirectory temp-dir "pdb-bench-"
+                                            (into-array FileAttribute []))
 
         ;; channels
         initial-hosts-ch (async/to-chan!
-                          (random-hosts numhosts offset pdb-host include-catalog-edges catalogs reports facts))
-        mq-ch (chan (message-buffer temp-dir numhosts))
+                          (populate-hosts numhosts offset pdb-host
+                                          include-catalog-edges
+                                          catalogs reports facts
+                                          host-dir))
+        mq-ch (chan numhosts)
         _ (register-shutdown-hook! #(async/close! mq-ch))
 
         command-send-ch (chan)
@@ -681,11 +636,6 @@
                              (async/toggle mixer {initial-hosts-ch {:solo true}})
                              (async/admix mixer mq-ch)
                              (if nummsgs (async/take (* numhosts nummsgs) ch) ch))
-        simulation-write-ch (let [ch (chan)
-                                  mult (async/mult ch)]
-                              (async/tap mult command-send-ch)
-                              (async/tap mult mq-ch)
-                              ch)
 
         ;; processes
         _rate-monitor-finished-ch (start-rate-monitor rate-monitor-ch
@@ -704,7 +654,12 @@
                                                                      command-delay-scheduler
                                                                      max-command-delay-ms)
         _ (start-simulation-loop numhosts run-interval-minutes nummsgs end-commands-in rand-perc
-                                 simulators simulation-write-ch simulation-read-ch include-catalog-edges)
+                                 simulators
+                                 mq-ch
+                                 command-send-ch
+                                 simulation-read-ch
+                                 include-catalog-edges)
+
         join-fn (fn join-benchmark
                   ([] (join-benchmark nil))
                   ([timeout-ms]
