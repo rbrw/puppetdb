@@ -263,8 +263,9 @@
 (pls/defn-validated ensure-certname
   "Adds the given host to the db iff it isn't already there."
   [certname :- String]
-  (jdbc/insert-multi! :certnames [{:certname certname}]
-                      {:on-conflict "do nothing"}))
+  (jdbc/do-prepared
+   "insert into certnames (certname) values (?) on conflict do nothing"
+   [certname]))
 
 (defn delete-certname!
   "Delete the given host from the db"
@@ -1207,13 +1208,21 @@
   ([pathmaps] (realize-paths pathmaps identity))
   ([pathmaps notice-pathmap]
    (let [path-array-conversion #(->> (map str %)
-                                     (sutils/array-to-param "text" String))]
+                                     (sutils/array-to-param "text" String))
+         val-vec #(vector (:path %) (:name %) (:depth %) (:value_type_id %) (:path_array %))
+         insert #(sql/execute!
+                  jdbc/*db*
+                  (cons
+                   (str "insert into fact_paths (path, name, depth, value_type_id, path_array)"
+                        "  values (?, ?, ?, ?, ?) on conflict do nothing")
+                   (map val-vec %))
+                  {:multi? true})]
      (when (seq pathmaps)
        (->> pathmaps
             (map notice-pathmap)
             (map #(update % :path_array path-array-conversion))
             (partition-all path-insertion-chunk-size)
-            (map #(jdbc/insert-multi! :fact_paths % {:on-conflict "do nothing"}))
+            (map insert)
             dorun)))))
 
 (defn hash-pathmaps-paths [pathmaps]
@@ -1237,9 +1246,9 @@
    (time! (get-storage-metric :add-new-fact)
      (jdbc/with-db-transaction []
        (let [paths-hash (let [digest (MessageDigest/getInstance "SHA-1")]
-                        (realize-paths (facts/facts->pathmaps values)
-                                       (pathmap-digestor digest))
-                        (.digest digest))
+                          (realize-paths (facts/facts->pathmaps values)
+                                         (pathmap-digestor digest))
+                          (.digest digest))
              hash (shash/fact-identity-hash fact-data)]
          (jdbc/insert! :factsets
                      {:certname certname
