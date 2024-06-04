@@ -703,7 +703,6 @@
                                                 (str "PDBMigrationsPool: " db-name)
                                                 "PDBMigrationsPool")
                                    :connection-timeout 3000
-                                   :rewrite-batched-inserts "true"
                                    :user connection-migrator
                                    :password migrator-password)
                             (jdbc/make-connection-pool database-metrics-registry))]

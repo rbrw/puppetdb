@@ -211,8 +211,7 @@
                  :user "puppetdb"
                  :subprotocol "postgresql"
                  :pool-name "PDBDataSetPool"
-                 :connection-timeout 3000
-                 :rewrite-batched-inserts "true")]
+                 :connection-timeout 3000)]
     (binding [jdbc/*db* {:datasource (jdbc/make-connection-pool config)}]
       (mapv #(% args) methods-array))))
 

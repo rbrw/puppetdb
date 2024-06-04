@@ -635,6 +635,7 @@
             maximum-pool-size
             expected-schema
             rewrite-batched-inserts]
+     :or {rewrite-batched-inserts "true"}
      :as _db-spec}
     metrics-registry]
    (let [conn-lifetime-ms (some-> conn-max-age pl-time/to-millis)
